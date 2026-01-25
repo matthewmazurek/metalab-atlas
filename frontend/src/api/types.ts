@@ -66,6 +66,7 @@ export interface ArtifactInfo {
 export interface ArrayInfo {
   shape: number[];
   dtype: string;
+  values?: number[] | null;
 }
 
 export interface NumpyInfo {

@@ -7,6 +7,7 @@ import { useArtifactPreview } from '@/api/hooks';
 import type { ArtifactInfo } from '@/api/types';
 import { Download, Eye, FileCode, FileImage, FileText, Package } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ArrayChart } from './ArrayChart';
 
 interface ArtifactListProps {
   runId: string;
@@ -62,12 +63,9 @@ function ArtifactPreviewDialog({
               {JSON.stringify(preview.preview.json_content, null, 2)}
             </pre>
           ) : preview?.preview?.numpy_info ? (
-            <div className="p-4 space-y-2">
-              <div className="text-sm text-muted-foreground">NumPy arrays:</div>
+            <div className="p-4 space-y-4">
               {Object.entries(preview.preview.numpy_info.arrays).map(([name, info]) => (
-                <div key={name} className="p-2 bg-muted rounded">
-                  <span className="font-mono">{name}</span>: shape={JSON.stringify(info.shape)}, dtype={info.dtype}
-                </div>
+                <ArrayChart key={name} name={name} info={info} />
               ))}
             </div>
           ) : preview?.preview?.text_content ? (

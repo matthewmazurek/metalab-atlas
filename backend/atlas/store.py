@@ -434,13 +434,21 @@ class FileStoreAdapter:
             try:
                 import numpy as np
 
+                # Max elements to include for visualization
+                MAX_ARRAY_ELEMENTS = 10000
+
                 with np.load(artifact_path, allow_pickle=False) as data:
                     arrays = {}
                     for name in data.files:
                         arr = data[name]
+                        # Include actual values for 1D arrays under size limit
+                        values = None
+                        if len(arr.shape) == 1 and arr.shape[0] <= MAX_ARRAY_ELEMENTS:
+                            values = arr.astype(float).tolist()
                         arrays[name] = ArrayInfo(
                             shape=list(arr.shape),
                             dtype=str(arr.dtype),
+                            values=values,
                         )
                     preview.numpy_info = NumpyInfo(arrays=arrays)
             except Exception:

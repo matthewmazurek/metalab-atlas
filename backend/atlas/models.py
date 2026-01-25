@@ -151,6 +151,10 @@ class ArrayInfo(BaseModel):
 
     shape: list[int]
     dtype: str
+    values: list[float] | None = Field(
+        default=None,
+        description="Array values for 1D arrays (for visualization)",
+    )
 
 
 class NumpyInfo(BaseModel):
