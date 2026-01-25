@@ -8,25 +8,42 @@ Dashboard for exploring and visualizing [metalab](../metalab) experiment runs.
 - **Plot Builder**: Y vs X plots with grouping, faceting, and replicate aggregation
 - **Run Detail**: View params, metrics, artifacts (with preview), and logs
 - **Compare Runs**: Side-by-side comparison with diff highlighting
+- **Remote Stores**: Access experiment results on HPC clusters via SSH/SFTP
 
 ## Quick Start
 
-### 1. Start the Backend
+### Local Store
 
 ```bash
 cd backend
 uv sync
-uv run metalab-atlas serve --store ../../runs/optbench --port 8000
+uv run metalab-atlas serve --store /path/to/runs
 ```
 
-Or directly with uvicorn:
+### Remote Store (SSH)
+
+Access experiment results on a remote machine (e.g., HPC cluster) without copying data:
 
 ```bash
-cd backend
-ATLAS_STORE_PATH=../../runs/optbench uv run uvicorn atlas.main:app --reload
+# Using scp-style syntax
+uv run metalab-atlas serve --remote user@hpc.cluster.edu:/scratch/runs
+
+# Using SSH URL syntax
+uv run metalab-atlas serve --remote ssh://user@host/path/to/runs
+
+# With explicit SSH key
+uv run metalab-atlas serve --remote user@host:/path --ssh-key ~/.ssh/id_rsa
+
+# With custom local cache directory
+uv run metalab-atlas serve --remote user@host:/path --cache-dir ./cache
 ```
 
-### 2. Start the Frontend
+Remote stores use local caching for performance:
+- Run records cached with 60s TTL
+- Artifacts cached locally on first access (1hr TTL)
+- SSH agent and default keys supported automatically
+
+### Frontend Development
 
 ```bash
 cd frontend
