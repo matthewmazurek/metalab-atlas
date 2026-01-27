@@ -244,6 +244,13 @@ class DataPoint(BaseModel):
     n: int = Field(..., description="Number of runs aggregated")
     run_ids: list[str] | None = Field(default=None, description="IDs of runs in this aggregate")
 
+    # Quartile fields for distribution visualization (candlestick/box plots)
+    y_min: float | None = Field(default=None, description="Minimum Y value")
+    y_q1: float | None = Field(default=None, description="First quartile (25th percentile)")
+    y_median: float | None = Field(default=None, description="Median (50th percentile)")
+    y_q3: float | None = Field(default=None, description="Third quartile (75th percentile)")
+    y_max: float | None = Field(default=None, description="Maximum Y value")
+
 
 class Series(BaseModel):
     """A series of data points for one group."""
@@ -260,6 +267,28 @@ class AggregateResponse(BaseModel):
     y_field: str
     agg_fn: AggFn
     total_runs: int = Field(..., description="Total runs included in aggregation")
+
+
+# =============================================================================
+# Histogram Models
+# =============================================================================
+
+
+class HistogramRequest(BaseModel):
+    """Request for histogram data."""
+
+    filter: FilterSpec | None = Field(default=None, description="Filter to apply before binning")
+    field: str = Field(..., description="Field to compute histogram for (e.g., 'metrics.accuracy')")
+    bin_count: int = Field(default=20, ge=1, le=100, description="Number of bins")
+
+
+class HistogramResponse(BaseModel):
+    """Histogram data response."""
+
+    field: str
+    bins: list[float] = Field(..., description="Bin edges (n+1 values)")
+    counts: list[int] = Field(..., description="Counts per bin (n values)")
+    total: int = Field(..., description="Total number of values")
 
 
 # =============================================================================

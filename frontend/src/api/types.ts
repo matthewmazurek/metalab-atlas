@@ -8,6 +8,7 @@ export type FilterOp = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains' | 'i
 export type AggFn = 'mean' | 'median' | 'min' | 'max' | 'count' | 'sum';
 export type ErrorBarType = 'none' | 'std' | 'sem' | 'ci95';
 export type FieldType = 'numeric' | 'string' | 'boolean' | 'unknown';
+export type ChartType = 'scatter' | 'line' | 'bar' | 'heatmap' | 'radar' | 'candlestick' | 'histogram';
 
 // Filter models
 export interface FieldFilter {
@@ -130,6 +131,12 @@ export interface DataPoint {
   y_high?: number | null;
   n: number;
   run_ids?: string[] | null;
+  // Quartile fields for distribution visualization
+  y_min?: number | null;
+  y_q1?: number | null;
+  y_median?: number | null;
+  y_q3?: number | null;
+  y_max?: number | null;
 }
 
 export interface Series {
@@ -172,4 +179,18 @@ export interface ExperimentInfo {
 
 export interface ExperimentsResponse {
   experiments: ExperimentInfo[];
+}
+
+// Histogram models
+export interface HistogramRequest {
+  filter?: FilterSpec | null;
+  field: string;
+  bin_count?: number;
+}
+
+export interface HistogramResponse {
+  field: string;
+  bins: number[];
+  counts: number[];
+  total: number;
 }

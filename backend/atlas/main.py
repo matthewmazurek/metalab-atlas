@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from atlas.routers import (
     aggregate_router,
     artifacts_router,
+    histogram_router,
     meta_router,
     runs_router,
 )
@@ -60,6 +61,7 @@ app.include_router(runs_router)
 app.include_router(artifacts_router)
 app.include_router(meta_router)
 app.include_router(aggregate_router)
+app.include_router(histogram_router)
 
 
 @app.get("/api/health")

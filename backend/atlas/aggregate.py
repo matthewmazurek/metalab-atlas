@@ -147,6 +147,7 @@ def _aggregate_group(
             # Aggregate
             y_agg = _compute_agg(y_values, agg_fn)
             y_low, y_high = _compute_error_bounds(y_values, y_agg, error_bars)
+            y_min, y_q1, y_median, y_q3, y_max = _compute_quartiles(y_values)
 
             points.append(
                 DataPoint(
@@ -156,6 +157,11 @@ def _aggregate_group(
                     y_high=y_high,
                     n=len(y_values),
                     run_ids=run_ids,
+                    y_min=y_min,
+                    y_q1=y_q1,
+                    y_median=y_median,
+                    y_q3=y_q3,
+                    y_max=y_max,
                 )
             )
         else:
@@ -169,6 +175,11 @@ def _aggregate_group(
                         y_high=None,
                         n=1,
                         run_ids=[run_id],
+                        y_min=y_val,
+                        y_q1=y_val,
+                        y_median=y_val,
+                        y_q3=y_val,
+                        y_max=y_val,
                     )
                 )
 
@@ -234,6 +245,50 @@ def _compute_error_bounds(
         return center - margin, center + margin
 
     return None, None
+
+
+def _compute_quartiles(
+    values: list[float],
+) -> tuple[float, float, float, float, float]:
+    """Compute quartiles (min, q1, median, q3, max) for distribution visualization."""
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+
+    if n == 0:
+        return (0.0, 0.0, 0.0, 0.0, 0.0)
+
+    if n == 1:
+        v = sorted_vals[0]
+        return (v, v, v, v, v)
+
+    y_min = sorted_vals[0]
+    y_max = sorted_vals[-1]
+
+    # Median
+    if n % 2 == 1:
+        y_median = sorted_vals[n // 2]
+    else:
+        y_median = (sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2
+
+    # Q1 (25th percentile) - median of lower half
+    lower_half = sorted_vals[: n // 2]
+    if len(lower_half) == 0:
+        y_q1 = y_min
+    elif len(lower_half) % 2 == 1:
+        y_q1 = lower_half[len(lower_half) // 2]
+    else:
+        y_q1 = (lower_half[len(lower_half) // 2 - 1] + lower_half[len(lower_half) // 2]) / 2
+
+    # Q3 (75th percentile) - median of upper half
+    upper_half = sorted_vals[(n + 1) // 2 :]
+    if len(upper_half) == 0:
+        y_q3 = y_max
+    elif len(upper_half) % 2 == 1:
+        y_q3 = upper_half[len(upper_half) // 2]
+    else:
+        y_q3 = (upper_half[len(upper_half) // 2 - 1] + upper_half[len(upper_half) // 2]) / 2
+
+    return (y_min, y_q1, y_median, y_q3, y_max)
 
 
 def _t_value_95(df: int) -> float:

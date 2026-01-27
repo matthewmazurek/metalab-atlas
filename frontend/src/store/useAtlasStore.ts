@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AggFn, ErrorBarType, FilterSpec, FieldFilter } from '@/api/types';
+import type { AggFn, ChartType, ErrorBarType, FilterSpec, FieldFilter } from '@/api/types';
 
 export interface PlotConfig {
   x_field: string;
@@ -14,6 +14,8 @@ export interface PlotConfig {
   agg_fn: AggFn;
   error_bars: ErrorBarType;
   reduce_replicates: boolean;
+  chart_type: ChartType;
+  bin_count: number;
 }
 
 export interface TableSort {

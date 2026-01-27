@@ -11,6 +11,8 @@ import type {
   ExperimentsResponse,
   FieldIndex,
   FilterSpec,
+  HistogramRequest,
+  HistogramResponse,
   RunListResponse,
   RunResponse,
 } from './types';
@@ -129,5 +131,10 @@ export async function fetchExperiments(): Promise<ExperimentsResponse> {
 
 export async function fetchAggregate(request: AggregateRequest): Promise<AggregateResponse> {
   const response = await api.post<AggregateResponse>('/api/aggregate', request);
+  return response.data;
+}
+
+export async function fetchHistogram(request: HistogramRequest): Promise<HistogramResponse> {
+  const response = await api.post<HistogramResponse>('/api/histogram', request);
   return response.data;
 }

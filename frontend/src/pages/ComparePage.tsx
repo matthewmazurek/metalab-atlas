@@ -12,13 +12,13 @@ import type { RunResponse } from '@/api/types';
 function formatDelta(current: number, baseline: number): { text: string; className: string } | null {
   const delta = current - baseline;
   if (delta === 0) return null;
-  
+
   const sign = delta > 0 ? '+' : '';
   // Use scientific notation for very small/large deltas, otherwise fixed
   const formatted = Math.abs(delta) < 0.0001 || Math.abs(delta) >= 10000
     ? delta.toExponential(2)
     : delta.toFixed(4);
-  
+
   return {
     text: `${sign}${formatted}`,
     className: delta > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
@@ -40,7 +40,7 @@ function renderDuration(
   showDelta: boolean
 ): JSX.Element {
   const delta = showDelta && baselineMs !== undefined ? ms - baselineMs : null;
-  
+
   return (
     <span className="font-mono flex items-center gap-2">
       {formatDurationValue(ms)}
@@ -95,7 +95,7 @@ function RunCompareCard({ runId, isBaseline, baselineRun }: RunCompareCardProps)
   ) => {
     const isNumeric = typeof value === 'number';
     const formattedValue = isNumeric ? value.toFixed(4) : String(value);
-    
+
     // Only show delta for numeric values when we have a baseline and this isn't the baseline
     const delta = showDelta && isNumeric && typeof baselineValue === 'number'
       ? formatDelta(value, baselineValue)

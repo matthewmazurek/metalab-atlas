@@ -1,4 +1,3 @@
-import { FilterPanel } from '@/components/runs/FilterPanel';
 import { RunTable } from '@/components/runs/RunTable';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
@@ -30,14 +29,7 @@ export function RunsPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-4 gap-6">
-        <div className="col-span-1">
-          <FilterPanel />
-        </div>
-        <div className="col-span-3">
-          <RunTable />
-        </div>
-      </div>
+      <RunTable />
     </div>
   );
 }

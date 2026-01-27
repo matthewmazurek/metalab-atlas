@@ -12,8 +12,9 @@ import {
   fetchFields,
   fetchExperiments,
   fetchAggregate,
+  fetchHistogram,
 } from './client';
-import type { AggregateRequest, FilterSpec } from './types';
+import type { AggregateRequest, FilterSpec, HistogramRequest } from './types';
 
 // Auto-refresh interval for list views (30 seconds)
 const REFETCH_INTERVAL = 30 * 1000;
@@ -35,6 +36,7 @@ export const queryKeys = {
   fields: (experimentId?: string) => ['fields', experimentId] as const,
   experiments: () => ['experiments'] as const,
   aggregate: (request: AggregateRequest) => ['aggregate', request] as const,
+  histogram: (request: HistogramRequest) => ['histogram', request] as const,
 };
 
 // Hooks
@@ -105,5 +107,13 @@ export function useAggregate(request: AggregateRequest, enabled = true) {
     queryKey: queryKeys.aggregate(request),
     queryFn: () => fetchAggregate(request),
     enabled: enabled && !!request.x_field && !!request.y_field,
+  });
+}
+
+export function useHistogram(request: HistogramRequest, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.histogram(request),
+    queryFn: () => fetchHistogram(request),
+    enabled: enabled && !!request.field,
   });
 }
