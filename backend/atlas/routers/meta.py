@@ -7,17 +7,38 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
-from atlas.deps import get_store
+from atlas.deps import StoreAdapter, get_store, refresh_stores
 from atlas.models import ExperimentInfo, ExperimentsResponse, FieldIndex
-from atlas.store import FileStoreAdapter
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
+class RefreshResponse(BaseModel):
+    """Response from store refresh."""
+    stores_discovered: int
+    message: str
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_store_discovery() -> RefreshResponse:
+    """
+    Refresh store discovery to pick up new experiments.
+    
+    Call this endpoint after adding new experiments to the store directory
+    without needing to restart the server.
+    """
+    count = refresh_stores()
+    return RefreshResponse(
+        stores_discovered=count,
+        message=f"Discovered {count} experiment store(s)",
+    )
+
+
 @router.get("/fields", response_model=FieldIndex)
 async def get_fields(
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
     experiment_id: str | None = Query(default=None),
 ) -> FieldIndex:
     """
@@ -41,7 +62,7 @@ async def get_fields(
 
 @router.get("/experiments", response_model=ExperimentsResponse)
 async def list_experiments(
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> ExperimentsResponse:
     """
     List all experiments with run counts.

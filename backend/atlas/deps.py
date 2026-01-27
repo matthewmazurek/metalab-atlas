@@ -55,7 +55,7 @@ def _get_remote_store_singleton(
 ) -> "RemoteStoreAdapter":
     """Create cached remote store adapter instance."""
     from atlas.remote import create_remote_adapter
-    
+
     return create_remote_adapter(
         url=url,
         key_path=key_path,
@@ -69,16 +69,16 @@ def get_store() -> StoreAdapter:
 
     The store path is read from ATLAS_STORE_PATH environment variable,
     defaulting to "./runs".
-    
+
     Supports:
     - Local paths: Creates FileStoreAdapter or MultiStoreAdapter
     - Remote URLs: Creates RemoteStoreAdapter (ssh://user@host/path or user@host:/path)
-    
+
     If the path contains multiple experiment stores in subdirectories,
     a MultiStoreAdapter is returned that aggregates all stores.
     """
     store_path = get_store_path()
-    
+
     if is_remote_url(store_path):
         config = get_remote_config()
         return _get_remote_store_singleton(
@@ -86,7 +86,7 @@ def get_store() -> StoreAdapter:
             config["key_path"],
             config["cache_dir"],
         )
-    
+
     # Local store
     resolved = str(Path(store_path).resolve())
     return _get_local_store_singleton(resolved)
@@ -101,13 +101,13 @@ def reset_store_cache() -> None:
 def refresh_stores() -> int:
     """
     Refresh store discovery to pick up new experiments.
-    
+
     Returns the number of stores discovered.
     """
     store = get_store()
-    if hasattr(store, 'refresh_stores'):
+    if hasattr(store, "refresh_stores"):
         store.refresh_stores()
         return len(store.store_paths)
-    if hasattr(store, 'refresh'):
+    if hasattr(store, "refresh"):
         store.refresh()
     return 1  # Single store adapter or remote

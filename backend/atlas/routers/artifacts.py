@@ -9,9 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from atlas.deps import get_store
+from atlas.deps import StoreAdapter, get_store
 from atlas.models import ArtifactInfo, ArtifactPreview
-from atlas.store import FileStoreAdapter
 
 router = APIRouter(prefix="/api/runs/{run_id}", tags=["artifacts"])
 
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/api/runs/{run_id}", tags=["artifacts"])
 @router.get("/artifacts", response_model=list[ArtifactInfo])
 async def list_artifacts(
     run_id: str,
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> list[ArtifactInfo]:
     """List artifacts for a run."""
     run = store.get_run(run_id)
@@ -32,7 +31,7 @@ async def list_artifacts(
 async def get_artifact(
     run_id: str,
     artifact_name: str,
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> Response:
     """
     Download artifact content.
@@ -60,7 +59,7 @@ async def get_artifact(
 async def get_artifact_preview(
     run_id: str,
     artifact_name: str,
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> ArtifactPreview:
     """
     Get safe artifact preview.
@@ -84,7 +83,7 @@ async def get_artifact_preview(
 async def get_log(
     run_id: str,
     log_name: str,
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> dict:
     """
     Get log content (stdout, stderr, etc.).

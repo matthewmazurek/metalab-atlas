@@ -109,6 +109,9 @@ class FieldIndexer:
         }
         self._index_path.write_text(json.dumps(data, indent=2))
 
+    # Record fields to index (discrete categorical fields)
+    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id"]
+
     def _rebuild_index(self) -> FieldIndex:
         """Rebuild the index by scanning all runs."""
         runs_dir = self._store_path / "runs"
@@ -117,6 +120,7 @@ class FieldIndexer:
 
         params_stats: dict[str, dict] = {}
         metrics_stats: dict[str, dict] = {}
+        record_stats: dict[str, dict] = {}
         run_count = 0
 
         for run_file in runs_dir.glob("*.json"):
@@ -136,6 +140,15 @@ class FieldIndexer:
                         metrics_stats[key] = self._init_stats(value)
                     self._update_stats(metrics_stats[key], value)
 
+                # Index record fields (status, experiment_id, etc.)
+                record = data.get("record", {})
+                for key in self.RECORD_FIELDS_TO_INDEX:
+                    if key in record:
+                        value = record[key]
+                        if key not in record_stats:
+                            record_stats[key] = self._init_stats(value)
+                        self._update_stats(record_stats[key], value)
+
             except (json.JSONDecodeError, KeyError):
                 continue
 
@@ -145,6 +158,7 @@ class FieldIndexer:
             run_count=run_count,
             params_fields={k: self._stats_to_field_info(v) for k, v in params_stats.items()},
             metrics_fields={k: self._stats_to_field_info(v) for k, v in metrics_stats.items()},
+            record_fields={k: self._stats_to_field_info(v) for k, v in record_stats.items()},
         )
 
     def _init_stats(self, value: Any) -> dict:

@@ -32,7 +32,8 @@ export function FilterPanel() {
   };
 
   const hasFilters =
-    filter.experiment_id || (filter.status && filter.status.length > 0);
+    filter.experiment_id ||
+    (filter.status && filter.status.length > 0);
 
   return (
     <div className="space-y-4 p-4 border rounded-lg bg-card">

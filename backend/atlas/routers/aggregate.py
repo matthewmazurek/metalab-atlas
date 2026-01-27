@@ -9,9 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from atlas.aggregate import compute_aggregate
-from atlas.deps import get_store
+from atlas.deps import StoreAdapter, get_store
 from atlas.models import AggregateRequest, AggregateResponse
-from atlas.store import FileStoreAdapter
 
 router = APIRouter(prefix="/api", tags=["aggregate"])
 
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["aggregate"])
 @router.post("/aggregate", response_model=AggregateResponse)
 async def aggregate(
     request: AggregateRequest,
-    store: Annotated[FileStoreAdapter, Depends(get_store)],
+    store: Annotated[StoreAdapter, Depends(get_store)],
 ) -> AggregateResponse:
     """
     Compute aggregated plot data.

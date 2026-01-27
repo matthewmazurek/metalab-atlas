@@ -70,15 +70,15 @@ def serve(
     reload: bool,
 ):
     """Start the Atlas dashboard server.
-    
+
     Examples:
-    
+
         # Local store
         metalab-atlas serve --store ./runs
-        
+
         # Remote store via SSH
         metalab-atlas serve --remote user@hpc.cluster.edu:/scratch/runs
-        
+
         # Remote with SSH key
         metalab-atlas serve --remote ssh://user@host/path --ssh-key ~/.ssh/id_rsa
     """
@@ -87,51 +87,53 @@ def serve(
     # Validate options
     if store and remote:
         raise click.UsageError("Cannot specify both --store and --remote")
-    
+
     if not store and not remote:
         store = "./runs"  # Default to local
-    
+
     # Check if bundled frontend exists
     static_dir = Path(__file__).parent / "static"
     has_frontend = (static_dir / "index.html").exists()
 
     click.echo("Starting Metalab Atlas...")
-    
+
     if remote:
         # Remote store mode
         os.environ["ATLAS_STORE_PATH"] = remote
-        
+
         if ssh_key:
             os.environ["ATLAS_SSH_KEY"] = str(Path(ssh_key).expanduser())
-        
+
         if cache_dir:
             os.environ["ATLAS_CACHE_DIR"] = str(Path(cache_dir).resolve())
-        
+
         click.echo(f"  Remote store: {remote}")
         click.echo(f"  Mode: remote (SSH/SFTP)")
-        
+
         if ssh_key:
             click.echo(f"  SSH key: {ssh_key}")
         else:
             click.echo(f"  SSH key: (using ssh-agent or default keys)")
-        
+
         if cache_dir:
             click.echo(f"  Cache dir: {cache_dir}")
         else:
             click.echo(f"  Cache dir: (system temp)")
-        
+
     else:
         # Local store mode
         from atlas.store import discover_stores, is_valid_store
-        
+
         store_path = Path(store).resolve()
         os.environ["ATLAS_STORE_PATH"] = str(store_path)
-        
+
         click.echo(f"  Store path: {store_path}")
-        
+
         if not store_path.exists():
             click.echo(f"  Warning: Store path does not exist", err=True)
-            click.echo("  The server will start but no runs will be available.", err=True)
+            click.echo(
+                "  The server will start but no runs will be available.", err=True
+            )
         else:
             stores = discover_stores(store_path)
             if len(stores) == 0:
@@ -139,7 +141,9 @@ def serve(
             elif len(stores) == 1 and is_valid_store(store_path):
                 click.echo(f"  Mode: single store")
             else:
-                click.echo(f"  Mode: multi-store ({len(stores)} experiments discovered)")
+                click.echo(
+                    f"  Mode: multi-store ({len(stores)} experiments discovered)"
+                )
                 for s in stores:
                     rel_path = s.relative_to(store_path) if s != store_path else "."
                     click.echo(f"    - {rel_path}")

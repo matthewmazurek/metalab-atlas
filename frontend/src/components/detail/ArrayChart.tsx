@@ -2,6 +2,7 @@ import { useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useAtlasStore } from '@/store/useAtlasStore';
 import type { ArrayInfo } from '@/api/types';
 
 interface ArrayChartProps {
@@ -11,6 +12,12 @@ interface ArrayChartProps {
 
 export function ArrayChart({ name, info }: ArrayChartProps) {
   const [logScale, setLogScale] = useState(false);
+  const { darkMode } = useAtlasStore();
+
+  // Text colors for dark/light mode
+  const textColor = darkMode ? '#e5e5e5' : '#333';
+  const subtextColor = darkMode ? '#a3a3a3' : '#666';
+  const lineColor = darkMode ? '#404040' : '#ccc';
 
   // Only render chart if we have 1D array values
   if (!info.values || info.shape.length !== 1) {
@@ -34,6 +41,11 @@ export function ArrayChart({ name, info }: ArrayChartProps) {
   const option = {
     tooltip: {
       trigger: 'axis',
+      backgroundColor: darkMode ? '#262626' : '#fff',
+      borderColor: darkMode ? '#404040' : '#ccc',
+      textStyle: {
+        color: textColor,
+      },
       formatter: (params: { data: [number, number] }[]) => {
         const [x, y] = params[0].data;
         return `<b>Index:</b> ${x}<br/><b>Value:</b> ${y.toExponential(4)}`;
@@ -52,6 +64,22 @@ export function ArrayChart({ name, info }: ArrayChartProps) {
       nameGap: 30,
       min: 0,
       max: info.values.length - 1,
+      nameTextStyle: {
+        color: textColor,
+      },
+      axisLabel: {
+        color: subtextColor,
+      },
+      axisLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
+      splitLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
     },
     yAxis: {
       type: effectiveLogScale ? 'log' : 'value',
@@ -59,8 +87,22 @@ export function ArrayChart({ name, info }: ArrayChartProps) {
       nameLocation: 'middle',
       nameGap: 60,
       scale: true,
+      nameTextStyle: {
+        color: textColor,
+      },
       axisLabel: {
+        color: subtextColor,
         formatter: (value: number) => value.toExponential(1),
+      },
+      axisLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
+      splitLine: {
+        lineStyle: {
+          color: lineColor,
+        },
       },
     },
     dataZoom: [
@@ -75,6 +117,23 @@ export function ArrayChart({ name, info }: ArrayChartProps) {
         filterMode: 'none',
         height: 20,
         bottom: 10,
+        textStyle: {
+          color: subtextColor,
+        },
+        borderColor: lineColor,
+        fillerColor: darkMode ? 'rgba(80, 80, 80, 0.3)' : 'rgba(150, 150, 150, 0.3)',
+        handleStyle: {
+          color: darkMode ? '#525252' : '#a3a3a3',
+          borderColor: darkMode ? '#737373' : '#666',
+        },
+        dataBackground: {
+          lineStyle: {
+            color: darkMode ? '#525252' : '#a3a3a3',
+          },
+          areaStyle: {
+            color: darkMode ? '#404040' : '#ddd',
+          },
+        },
       },
     ],
     series: [

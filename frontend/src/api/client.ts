@@ -13,11 +13,12 @@ import type {
   FilterSpec,
   RunListResponse,
   RunResponse,
-  RunStatus,
 } from './types';
 
-// Base URL for API - defaults to same origin or localhost:8000
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Base URL for API
+// In production (bundled), use same origin. In dev, use localhost:8000
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (import.meta.env.PROD ? '' : 'http://localhost:8000');
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -47,6 +48,10 @@ function buildRunsParams(params: {
   }
   if (params.filter?.started_before) {
     searchParams.set('started_before', params.filter.started_before);
+  }
+  // Pass field_filters as JSON-encoded query param
+  if (params.filter?.field_filters && params.filter.field_filters.length > 0) {
+    searchParams.set('field_filters', JSON.stringify(params.filter.field_filters));
   }
   if (params.sort_by) {
     searchParams.set('sort_by', params.sort_by);

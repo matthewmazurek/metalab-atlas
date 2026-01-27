@@ -24,6 +24,13 @@ export interface FilterSpec {
   field_filters?: FieldFilter[] | null;
 }
 
+// Error info
+export interface ErrorInfo {
+  type: string;
+  message: string;
+  traceback?: string | null;
+}
+
 // Provenance
 export interface ProvenanceInfo {
   code_hash?: string | null;
@@ -46,7 +53,7 @@ export interface RecordFields {
   finished_at: string;
   duration_ms: number;
   provenance: ProvenanceInfo;
-  error?: Record<string, unknown> | null;
+  error?: ErrorInfo | null;
   tags: string[];
   warnings: Record<string, unknown>[];
   notes?: string | null;

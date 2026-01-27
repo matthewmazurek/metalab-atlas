@@ -3,11 +3,15 @@ Store adapter: Backend-agnostic interface for run data access.
 
 Initial implementation wraps metalab's FileStore with in-memory filtering.
 Designed for future replacement with indexed backend (SQLite/DuckDB).
+
+Supports multi-store discovery: when given a parent directory, discovers
+all subdirectories that are valid metalab stores with run records.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import sys
 from datetime import datetime
@@ -36,6 +40,8 @@ from atlas.models import (
     RunStatus,
     Series,
 )
+
+logger = logging.getLogger(__name__)
 
 # Add metalab to path if needed
 METALAB_PATH = Path(__file__).parent.parent.parent.parent / "metalab"
@@ -175,6 +181,16 @@ class FileStoreAdapter:
     def _get_field_value(self, run: RunResponse, field_path: str) -> Any:
         """Get a value from a run using dot-notation field path."""
         parts = field_path.split(".", 1)
+        
+        # Handle special case: searching across all metrics
+        if field_path == "metrics":
+            # Return concatenated string of all metric key:value pairs for text search
+            return " ".join(f"{k}:{v}" for k, v in run.metrics.items())
+        
+        # Handle special case: searching across all params
+        if field_path == "params":
+            return " ".join(f"{k}:{v}" for k, v in run.params.items())
+
         if len(parts) != 2:
             return None
 
@@ -203,10 +219,26 @@ class FileStoreAdapter:
             result = [r for r in result if r.record.status in status_set]
 
         # Filter by time range
+        # Note: metalab stores timestamps in local time (naive), but filter dates
+        # come from the frontend as UTC. Convert filter dates to local time.
         if filter.started_after:
-            result = [r for r in result if r.record.started_at >= filter.started_after]
+            after = filter.started_after
+            # Convert UTC to local time if timezone-aware
+            if after.tzinfo is not None:
+                after = after.astimezone().replace(tzinfo=None)
+            result = [
+                r for r in result
+                if r.record.started_at >= after
+            ]
         if filter.started_before:
-            result = [r for r in result if r.record.started_at <= filter.started_before]
+            before = filter.started_before
+            # Convert UTC to local time if timezone-aware
+            if before.tzinfo is not None:
+                before = before.astimezone().replace(tzinfo=None)
+            result = [
+                r for r in result
+                if r.record.started_at <= before
+            ]
 
         # Apply field filters
         if filter.field_filters:
@@ -238,7 +270,7 @@ class FileStoreAdapter:
                 elif ff.op == FilterOp.GE:
                     match = value >= ff.value
                 elif ff.op == FilterOp.CONTAINS:
-                    match = ff.value in str(value)
+                    match = str(ff.value).lower() in str(value).lower()
                 elif ff.op == FilterOp.IN:
                     match = value in ff.value
             except (TypeError, ValueError):
@@ -294,6 +326,9 @@ class FileStoreAdapter:
             return None
         return self._convert_record(record)
 
+    # Record fields to index (discrete categorical fields)
+    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id"]
+
     def get_field_index(self, filter: FilterSpec | None = None) -> FieldIndex:
         """Build field index from runs."""
         records = self._get_cached_records()
@@ -304,6 +339,7 @@ class FileStoreAdapter:
 
         params_fields: dict[str, dict] = {}
         metrics_fields: dict[str, dict] = {}
+        record_fields: dict[str, dict] = {}
 
         for run in runs:
             # Index params
@@ -330,6 +366,23 @@ class FileStoreAdapter:
                     }
                 self._update_field_stats(metrics_fields[key], value)
 
+            # Index record fields (status, experiment_id, etc.)
+            for key in self.RECORD_FIELDS_TO_INDEX:
+                value = getattr(run.record, key, None)
+                if value is not None:
+                    # Convert enum values to their string value
+                    if hasattr(value, 'value'):
+                        value = value.value
+                    if key not in record_fields:
+                        record_fields[key] = {
+                            "type": self._infer_type(value),
+                            "count": 0,
+                            "values": set(),
+                            "min": None,
+                            "max": None,
+                        }
+                    self._update_field_stats(record_fields[key], value)
+
         return FieldIndex(
             version=1,
             last_scan=datetime.now(),
@@ -339,6 +392,9 @@ class FileStoreAdapter:
             },
             metrics_fields={
                 k: self._to_field_info(v) for k, v in metrics_fields.items()
+            },
+            record_fields={
+                k: self._to_field_info(v) for k, v in record_fields.items()
             },
         )
 
@@ -510,3 +566,300 @@ class FileStoreAdapter:
             experiments[exp_id] = (count, latest)
 
         return [(exp_id, count, latest) for exp_id, (count, latest) in experiments.items()]
+
+
+def is_valid_store(path: Path) -> bool:
+    """
+    Check if a path is a valid metalab store.
+    
+    A valid store has a _meta.json file at its root.
+    """
+    meta_file = path / "_meta.json"
+    return meta_file.exists()
+
+
+def discover_stores(root: Path, max_depth: int = 2) -> list[Path]:
+    """
+    Discover all valid metalab stores starting from root.
+    
+    Searches up to max_depth levels deep. If root itself is a valid store
+    with runs, it's included. Subdirectories that are valid stores are also
+    discovered.
+    
+    Args:
+        root: Starting directory
+        max_depth: Maximum depth to search (default 2)
+    
+    Returns:
+        List of paths to valid stores
+    """
+    stores = []
+    
+    # Check if root itself is a valid store
+    if is_valid_store(root):
+        stores.append(root)
+    
+    # Search subdirectories
+    def search(path: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        
+        try:
+            for entry in path.iterdir():
+                if entry.is_dir() and not entry.name.startswith("."):
+                    if is_valid_store(entry):
+                        stores.append(entry)
+                    else:
+                        # Continue searching deeper
+                        search(entry, depth + 1)
+        except PermissionError:
+            pass
+    
+    search(root, 1)
+    return stores
+
+
+class MultiStoreAdapter:
+    """
+    Adapter that aggregates multiple FileStore instances.
+    
+    Discovers all valid stores in a directory tree and presents
+    a unified view of all runs across all stores.
+    """
+    
+    def __init__(self, root_path: str | Path, max_depth: int = 2) -> None:
+        """
+        Initialize with root path for store discovery.
+        
+        Args:
+            root_path: Root directory to search for stores
+            max_depth: Maximum depth to search for stores
+        """
+        self._root_path = Path(root_path)
+        self._max_depth = max_depth
+        self._adapters: list[FileStoreAdapter] = []
+        self._store_paths: list[Path] = []
+        self._cache_time: datetime | None = None
+        self._cache_ttl_seconds = 30
+        self._discover_stores()
+    
+    def _discover_stores(self) -> None:
+        """Discover and initialize store adapters."""
+        self._store_paths = discover_stores(self._root_path, self._max_depth)
+        self._adapters = [FileStoreAdapter(p) for p in self._store_paths]
+        
+        if self._store_paths:
+            logger.info(f"Discovered {len(self._store_paths)} store(s):")
+            for p in self._store_paths:
+                logger.info(f"  - {p}")
+        else:
+            logger.warning(f"No valid stores found in {self._root_path}")
+    
+    def refresh_stores(self) -> None:
+        """Re-discover stores (call if new experiments are added)."""
+        self._discover_stores()
+    
+    @property
+    def store_paths(self) -> list[Path]:
+        """Return list of discovered store paths."""
+        return self._store_paths.copy()
+    
+    def query_runs(
+        self,
+        filter: FilterSpec | None = None,
+        sort_by: str | None = None,
+        sort_order: str = "desc",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[RunResponse], int]:
+        """Query runs across all stores."""
+        all_runs: list[RunResponse] = []
+        
+        for adapter in self._adapters:
+            # Get all runs from each store (no pagination yet)
+            runs, _ = adapter.query_runs(
+                filter=filter,
+                sort_by=None,  # Sort after aggregation
+                sort_order=sort_order,
+                limit=100000,  # Get all
+                offset=0,
+            )
+            all_runs.extend(runs)
+        
+        total = len(all_runs)
+        
+        # Sort aggregated results
+        if sort_by:
+            reverse = sort_order == "desc"
+            try:
+                # Use the same field access as FileStoreAdapter
+                def get_value(run: RunResponse) -> Any:
+                    parts = sort_by.split(".", 1)
+                    if len(parts) != 2:
+                        return ""
+                    namespace, key = parts
+                    if namespace == "record":
+                        return getattr(run.record, key, "")
+                    elif namespace == "params":
+                        return run.params.get(key, "")
+                    elif namespace == "metrics":
+                        return run.metrics.get(key, "")
+                    return ""
+                
+                all_runs.sort(key=get_value, reverse=reverse)
+            except (TypeError, ValueError):
+                pass
+        else:
+            # Default sort by started_at desc
+            all_runs.sort(key=lambda r: r.record.started_at, reverse=True)
+        
+        # Paginate
+        runs = all_runs[offset : offset + limit]
+        
+        return runs, total
+    
+    def get_run(self, run_id: str) -> RunResponse | None:
+        """Get a single run by ID from any store."""
+        for adapter in self._adapters:
+            run = adapter.get_run(run_id)
+            if run is not None:
+                return run
+        return None
+    
+    def get_field_index(self, filter: FilterSpec | None = None) -> FieldIndex:
+        """Build aggregated field index from all stores."""
+        # Merge field indices from all stores
+        all_params: dict[str, dict] = {}
+        all_metrics: dict[str, dict] = {}
+        all_records: dict[str, dict] = {}
+        total_runs = 0
+        
+        def merge_fields(target: dict, source_fields: dict[str, FieldInfo]) -> None:
+            """Merge field info from source into target dict."""
+            for key, info in source_fields.items():
+                if key not in target:
+                    target[key] = {
+                        "type": info.type,
+                        "count": 0,
+                        "values": set(info.values or []),
+                        "min": info.min_value,
+                        "max": info.max_value,
+                    }
+                stats = target[key]
+                stats["count"] += info.count
+                if info.values:
+                    stats["values"].update(info.values)
+                if info.min_value is not None:
+                    if stats["min"] is None or info.min_value < stats["min"]:
+                        stats["min"] = info.min_value
+                if info.max_value is not None:
+                    if stats["max"] is None or info.max_value > stats["max"]:
+                        stats["max"] = info.max_value
+        
+        for adapter in self._adapters:
+            idx = adapter.get_field_index(filter)
+            total_runs += idx.run_count
+            
+            # Merge all field types
+            merge_fields(all_params, idx.params_fields)
+            merge_fields(all_metrics, idx.metrics_fields)
+            merge_fields(all_records, idx.record_fields)
+        
+        def to_field_info(stats: dict) -> FieldInfo:
+            values = None
+            if stats["type"] in (FieldType.STRING, FieldType.BOOLEAN):
+                values = sorted(stats["values"])[:100]
+            return FieldInfo(
+                type=stats["type"],
+                count=stats["count"],
+                values=values,
+                min_value=stats.get("min"),
+                max_value=stats.get("max"),
+            )
+        
+        return FieldIndex(
+            version=1,
+            last_scan=datetime.now(),
+            run_count=total_runs,
+            params_fields={k: to_field_info(v) for k, v in all_params.items()},
+            metrics_fields={k: to_field_info(v) for k, v in all_metrics.items()},
+            record_fields={k: to_field_info(v) for k, v in all_records.items()},
+        )
+    
+    def get_artifact_content(
+        self, run_id: str, artifact_name: str
+    ) -> tuple[bytes, str]:
+        """Get artifact content from the appropriate store."""
+        for adapter in self._adapters:
+            try:
+                return adapter.get_artifact_content(run_id, artifact_name)
+            except FileNotFoundError:
+                continue
+        raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
+    
+    def get_artifact_preview(
+        self, run_id: str, artifact_name: str
+    ) -> ArtifactPreview:
+        """Get artifact preview from the appropriate store."""
+        for adapter in self._adapters:
+            try:
+                return adapter.get_artifact_preview(run_id, artifact_name)
+            except FileNotFoundError:
+                continue
+        raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
+    
+    def get_log(self, run_id: str, log_name: str) -> str | None:
+        """Get log content from the appropriate store."""
+        for adapter in self._adapters:
+            log = adapter.get_log(run_id, log_name)
+            if log is not None:
+                return log
+        return None
+    
+    def list_experiments(self) -> list[tuple[str, int, datetime | None]]:
+        """List all experiments across all stores."""
+        experiments: dict[str, tuple[int, datetime | None]] = {}
+        
+        for adapter in self._adapters:
+            for exp_id, count, latest in adapter.list_experiments():
+                if exp_id not in experiments:
+                    experiments[exp_id] = (0, None)
+                
+                existing_count, existing_latest = experiments[exp_id]
+                new_count = existing_count + count
+                new_latest = latest
+                if existing_latest is not None:
+                    if latest is None or existing_latest > latest:
+                        new_latest = existing_latest
+                experiments[exp_id] = (new_count, new_latest)
+        
+        return [(exp_id, count, latest) for exp_id, (count, latest) in experiments.items()]
+
+
+def create_store_adapter(store_path: str | Path) -> FileStoreAdapter | MultiStoreAdapter:
+    """
+    Create the appropriate store adapter for a given path.
+    
+    If the path is a single valid store, returns a FileStoreAdapter.
+    Otherwise, returns a MultiStoreAdapter that discovers stores in subdirectories.
+    
+    Args:
+        store_path: Path to store or parent directory containing stores
+    
+    Returns:
+        FileStoreAdapter or MultiStoreAdapter
+    """
+    path = Path(store_path)
+    
+    # Check if it's a single valid store with runs
+    if is_valid_store(path):
+        # Still check for nested stores - if there are any, use MultiStoreAdapter
+        nested = discover_stores(path, max_depth=2)
+        if len(nested) == 1 and nested[0] == path:
+            # Single store, use simple adapter
+            logger.info(f"Using single store: {path}")
+            return FileStoreAdapter(path)
+    
+    # Use multi-store discovery
+    logger.info(f"Using multi-store discovery from: {path}")
+    return MultiStoreAdapter(path)

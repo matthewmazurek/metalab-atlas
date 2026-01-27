@@ -2,7 +2,7 @@
  * React Query hooks for Metalab Atlas API.
  */
 
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   fetchRuns,
   fetchRun,
@@ -15,10 +15,18 @@ import {
 } from './client';
 import type { AggregateRequest, FilterSpec } from './types';
 
+// Auto-refresh interval for list views (30 seconds)
+const REFETCH_INTERVAL = 30 * 1000;
+
 // Query keys
 export const queryKeys = {
-  runs: (params: { filter?: FilterSpec; limit?: number; offset?: number }) =>
-    ['runs', params] as const,
+  runs: (params: {
+    filter?: FilterSpec;
+    sort_by?: string;
+    sort_order?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+  }) => ['runs', params] as const,
   run: (runId: string) => ['run', runId] as const,
   artifacts: (runId: string) => ['artifacts', runId] as const,
   artifactPreview: (runId: string, artifactName: string) =>
@@ -40,6 +48,7 @@ export function useRuns(params: {
   return useQuery({
     queryKey: queryKeys.runs(params),
     queryFn: () => fetchRuns(params),
+    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -79,6 +88,7 @@ export function useFields(experimentId?: string) {
   return useQuery({
     queryKey: queryKeys.fields(experimentId),
     queryFn: () => fetchFields(experimentId),
+    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -86,6 +96,7 @@ export function useExperiments() {
   return useQuery({
     queryKey: queryKeys.experiments(),
     queryFn: fetchExperiments,
+    refetchInterval: REFETCH_INTERVAL,
   });
 }
 

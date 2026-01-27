@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AggFn, ErrorBarType, FilterSpec } from '@/api/types';
+import type { AggFn, ErrorBarType, FilterSpec, FieldFilter } from '@/api/types';
 
 export interface PlotConfig {
   x_field: string;
@@ -14,6 +14,18 @@ export interface PlotConfig {
   agg_fn: AggFn;
   error_bars: ErrorBarType;
   reduce_replicates: boolean;
+}
+
+export interface TableSort {
+  field: string;
+  order: 'asc' | 'desc';
+}
+
+export interface ColumnFilter {
+  columnId: string;
+  field: string;
+  value: string;           // For contains filter (text search)
+  values?: string[];       // For multi-select filter (discrete values)
 }
 
 interface AtlasUIState {
@@ -27,6 +39,10 @@ interface AtlasUIState {
 
   // Filter state (synced with URL)
   filter: FilterSpec;
+
+  // Table state
+  tableSort: TableSort | null;
+  columnFilters: ColumnFilter[];
 
   // Plot builder state
   plotConfig: PlotConfig | null;
@@ -42,17 +58,26 @@ interface AtlasUIState {
   updateFilter: (partial: Partial<FilterSpec>) => void;
   setPlotConfig: (config: PlotConfig | null) => void;
   updatePlotConfig: (partial: Partial<PlotConfig>) => void;
+  setTableSort: (sort: TableSort | null) => void;
+  setColumnFilter: (columnId: string, field: string, value: string) => void;
+  setColumnFilterValues: (columnId: string, field: string, values: string[]) => void;
+  clearColumnFilter: (columnId: string) => void;
+  clearAllColumnFilters: () => void;
+  getFieldFilters: () => FieldFilter[];
+  getColumnFilterValues: (columnId: string) => string[];
 }
 
 export const useAtlasStore = create<AtlasUIState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       // Initial state
       selectedRunIds: [],
       baselineRunId: null,
       pinnedColumns: ['record.status', 'record.duration_ms'],
       darkMode: false,
       filter: {},
+      tableSort: { field: 'record.started_at', order: 'desc' },
+      columnFilters: [],
       plotConfig: null,
 
       // Actions
@@ -87,6 +112,60 @@ export const useAtlasStore = create<AtlasUIState>()(
             ? { ...state.plotConfig, ...partial }
             : null,
         })),
+
+      setTableSort: (sort) => set({ tableSort: sort }),
+
+      setColumnFilter: (columnId, field, value) =>
+        set((state) => {
+          const existing = state.columnFilters.filter((f) => f.columnId !== columnId);
+          if (value) {
+            return { columnFilters: [...existing, { columnId, field, value }] };
+          }
+          return { columnFilters: existing };
+        }),
+
+      setColumnFilterValues: (columnId, field, values) =>
+        set((state) => {
+          const existing = state.columnFilters.filter((f) => f.columnId !== columnId);
+          if (values.length > 0) {
+            return { columnFilters: [...existing, { columnId, field, value: '', values }] };
+          }
+          return { columnFilters: existing };
+        }),
+
+      clearColumnFilter: (columnId) =>
+        set((state) => ({
+          columnFilters: state.columnFilters.filter((f) => f.columnId !== columnId),
+        })),
+
+      clearAllColumnFilters: () => set({ columnFilters: [] }),
+
+      getFieldFilters: () => {
+        const { columnFilters } = get();
+        return columnFilters
+          .filter((cf) => cf.value || (cf.values && cf.values.length > 0))
+          .map((cf) => {
+            // Use 'in' operator for multi-select values, 'contains' for text search
+            if (cf.values && cf.values.length > 0) {
+              return {
+                field: cf.field,
+                op: 'in' as const,
+                value: cf.values,
+              };
+            }
+            return {
+              field: cf.field,
+              op: 'contains' as const,
+              value: cf.value,
+            };
+          });
+      },
+
+      getColumnFilterValues: (columnId) => {
+        const { columnFilters } = get();
+        const filter = columnFilters.find((f) => f.columnId === columnId);
+        return filter?.values || [];
+      },
     }),
     {
       name: 'atlas-ui-storage',

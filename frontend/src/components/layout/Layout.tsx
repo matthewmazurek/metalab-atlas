@@ -1,8 +1,8 @@
+import { useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { BarChart3, GitCompare, LayoutList, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
-import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: 'Runs', icon: LayoutList },
@@ -14,8 +14,17 @@ export function Layout() {
   const location = useLocation();
   const { darkMode, toggleDarkMode } = useAtlasStore();
 
+  // Apply dark class to <html> element so CSS variables cascade properly
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   return (
-    <div className={cn('min-h-screen bg-background', darkMode && 'dark')}>
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <header className="border-b bg-card">
         <div className="flex h-14 items-center px-4 gap-4">

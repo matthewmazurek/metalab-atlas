@@ -11,4 +11,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    // Output to backend package for bundling
+    outDir: '../backend/atlas/static',
+    emptyOutDir: true,
+  },
 })

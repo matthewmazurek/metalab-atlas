@@ -1,6 +1,7 @@
 import ReactECharts from 'echarts-for-react';
 import type { AggregateResponse } from '@/api/types';
 import { useNavigate } from 'react-router-dom';
+import { useAtlasStore } from '@/store/useAtlasStore';
 
 interface ChartProps {
   data: AggregateResponse;
@@ -8,6 +9,12 @@ interface ChartProps {
 
 export function Chart({ data }: ChartProps) {
   const navigate = useNavigate();
+  const { darkMode } = useAtlasStore();
+
+  // Text colors for dark/light mode
+  const textColor = darkMode ? '#e5e5e5' : '#333';
+  const subtextColor = darkMode ? '#a3a3a3' : '#666';
+  const lineColor = darkMode ? '#404040' : '#ccc';
 
   if (data.series.length === 0) {
     return (
@@ -21,6 +28,11 @@ export function Chart({ data }: ChartProps) {
   const option = {
     tooltip: {
       trigger: 'item',
+      backgroundColor: darkMode ? '#262626' : '#fff',
+      borderColor: darkMode ? '#404040' : '#ccc',
+      textStyle: {
+        color: textColor,
+      },
       formatter: (params: { data: { value: number[]; runIds?: string[] } }) => {
         const [x, y] = params.data.value;
         const runIds = params.data.runIds;
@@ -37,6 +49,9 @@ export function Chart({ data }: ChartProps) {
     legend: {
       data: data.series.map((s) => s.name),
       top: 'top',
+      textStyle: {
+        color: textColor,
+      },
     },
     xAxis: {
       name: data.x_field,
@@ -46,12 +61,44 @@ export function Chart({ data }: ChartProps) {
       data: typeof data.series[0]?.points[0]?.x === 'string'
         ? [...new Set(data.series.flatMap((s) => s.points.map((p) => p.x)))]
         : undefined,
+      nameTextStyle: {
+        color: textColor,
+      },
+      axisLabel: {
+        color: subtextColor,
+      },
+      axisLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
+      splitLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
     },
     yAxis: {
       name: data.y_field,
       nameLocation: 'middle',
       nameGap: 50,
       type: 'value',
+      nameTextStyle: {
+        color: textColor,
+      },
+      axisLabel: {
+        color: subtextColor,
+      },
+      axisLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
+      splitLine: {
+        lineStyle: {
+          color: lineColor,
+        },
+      },
     },
     series: data.series.flatMap((series) => {
       const mainSeries = {
@@ -79,7 +126,7 @@ export function Chart({ data }: ChartProps) {
             name: `${series.name} (error)`,
             type: 'custom',
             renderItem: (
-              params: { coordSys: { x: number; y: number; width: number; height: number } },
+              _params: { coordSys: { x: number; y: number; width: number; height: number } },
               api: {
                 value: (idx: number) => number;
                 coord: (val: [number, number]) => [number, number];
@@ -105,7 +152,7 @@ export function Chart({ data }: ChartProps) {
                       x2: lowPoint[0],
                       y2: lowPoint[1],
                     },
-                    style: { stroke: '#999', lineWidth: 1 },
+                    style: { stroke: subtextColor, lineWidth: 1 },
                   },
                   {
                     type: 'line',
@@ -115,7 +162,7 @@ export function Chart({ data }: ChartProps) {
                       x2: highPoint[0] + halfWidth,
                       y2: highPoint[1],
                     },
-                    style: { stroke: '#999', lineWidth: 1 },
+                    style: { stroke: subtextColor, lineWidth: 1 },
                   },
                   {
                     type: 'line',
@@ -125,7 +172,7 @@ export function Chart({ data }: ChartProps) {
                       x2: lowPoint[0] + halfWidth,
                       y2: lowPoint[1],
                     },
-                    style: { stroke: '#999', lineWidth: 1 },
+                    style: { stroke: subtextColor, lineWidth: 1 },
                   },
                 ],
               };

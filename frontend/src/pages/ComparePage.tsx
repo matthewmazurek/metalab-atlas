@@ -25,6 +25,38 @@ function formatDelta(current: number, baseline: number): { text: string; classNa
   };
 }
 
+/** Format duration in ms with appropriate unit */
+function formatDurationValue(ms: number): string {
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
+  return `${ms}ms`;
+}
+
+/** Render duration with delta (inverted colors: slower is bad) */
+function renderDuration(
+  ms: number,
+  baselineMs: number | undefined,
+  showDelta: boolean
+): JSX.Element {
+  const delta = showDelta && baselineMs !== undefined ? ms - baselineMs : null;
+  
+  return (
+    <span className="font-mono flex items-center gap-2">
+      {formatDurationValue(ms)}
+      {delta !== null && delta !== 0 && (
+        <span className={cn(
+          'text-xs',
+          // Inverted: longer duration is bad (red), shorter is good (green)
+          delta > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
+        )}>
+          ({delta > 0 ? '+' : ''}{formatDurationValue(delta)})
+        </span>
+      )}
+    </span>
+  );
+}
+
 interface RunCompareCardProps {
   runId: string;
   isBaseline: boolean;
@@ -153,7 +185,7 @@ function RunCompareCard({ runId, isBaseline, baselineRun }: RunCompareCardProps)
           {/* Duration */}
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Duration</span>
-            {renderValueWithDelta(
+            {renderDuration(
               run.record.duration_ms,
               baselineRun?.record.duration_ms,
               showDeltas
