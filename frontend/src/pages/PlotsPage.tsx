@@ -1,16 +1,33 @@
 import { FilterPanel } from '@/components/runs/FilterPanel';
 import { PlotBuilder } from '@/components/plots/PlotBuilder';
+import { PageTitle } from '@/components/ui/typography';
+import { useAtlasStore } from '@/store/useAtlasStore';
+import { cn } from '@/lib/utils';
 
 export function PlotsPage() {
-  return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Plots</h1>
+  const { sidebarCollapsed } = useAtlasStore();
 
-      <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-1">
+  return (
+    <div className="space-y-4">
+      {/* Header - fixed height for consistency */}
+      <div className="flex items-center justify-between h-10">
+        <PageTitle>Plots</PageTitle>
+      </div>
+
+      {/* Main content with sidebar */}
+      <div className="flex gap-4">
+        {/* Sidebar */}
+        <div
+          className={cn(
+            'shrink-0 overflow-hidden transition-all duration-200',
+            sidebarCollapsed ? 'w-10' : 'w-64'
+          )}
+        >
           <FilterPanel />
         </div>
-        <div className="col-span-4">
+
+        {/* Plot builder */}
+        <div className="flex-1 min-w-0">
           <PlotBuilder />
         </div>
       </div>

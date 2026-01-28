@@ -3,7 +3,7 @@
  */
 
 // Enums
-export type RunStatus = 'success' | 'failed' | 'cancelled';
+export type RunStatus = 'success' | 'failed' | 'cancelled' | 'running';
 export type FilterOp = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains' | 'in';
 export type AggFn = 'mean' | 'median' | 'min' | 'max' | 'count' | 'sum';
 export type ErrorBarType = 'none' | 'std' | 'sem' | 'ci95';
@@ -51,8 +51,8 @@ export interface RecordFields {
   params_fingerprint: string;
   seed_fingerprint: string;
   started_at: string;
-  finished_at: string;
-  duration_ms: number;
+  finished_at?: string | null;  // null for RUNNING status
+  duration_ms?: number | null;  // null for RUNNING status
   provenance: ProvenanceInfo;
   error?: ErrorInfo | null;
   tags: string[];
@@ -179,6 +179,40 @@ export interface ExperimentInfo {
 
 export interface ExperimentsResponse {
   experiments: ExperimentInfo[];
+}
+
+// Manifest models
+export interface ManifestInfo {
+  experiment_id: string;
+  timestamp: string;
+  submitted_at: string;
+  total_runs: number;
+}
+
+export interface ManifestListResponse {
+  manifests: ManifestInfo[];
+}
+
+export interface OperationInfo {
+  ref?: string | null;
+  name?: string | null;
+  code_hash?: string | null;
+}
+
+export interface ManifestResponse {
+  experiment_id: string;
+  name?: string | null;
+  version?: string | null;
+  description?: string | null;
+  tags: string[];
+  operation?: OperationInfo | null;
+  params: Record<string, unknown>;
+  seeds: Record<string, unknown>;
+  context_fingerprint?: string | null;
+  runtime_hints?: Record<string, unknown> | null;
+  total_runs: number;
+  run_ids?: string[] | null;
+  submitted_at?: string | null;
 }
 
 // Histogram models

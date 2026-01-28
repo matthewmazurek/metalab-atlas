@@ -277,7 +277,9 @@ def _compute_quartiles(
     elif len(lower_half) % 2 == 1:
         y_q1 = lower_half[len(lower_half) // 2]
     else:
-        y_q1 = (lower_half[len(lower_half) // 2 - 1] + lower_half[len(lower_half) // 2]) / 2
+        y_q1 = (
+            lower_half[len(lower_half) // 2 - 1] + lower_half[len(lower_half) // 2]
+        ) / 2
 
     # Q3 (75th percentile) - median of upper half
     upper_half = sorted_vals[(n + 1) // 2 :]
@@ -286,7 +288,9 @@ def _compute_quartiles(
     elif len(upper_half) % 2 == 1:
         y_q3 = upper_half[len(upper_half) // 2]
     else:
-        y_q3 = (upper_half[len(upper_half) // 2 - 1] + upper_half[len(upper_half) // 2]) / 2
+        y_q3 = (
+            upper_half[len(upper_half) // 2 - 1] + upper_half[len(upper_half) // 2]
+        ) / 2
 
     return (y_min, y_q1, y_median, y_q3, y_max)
 
@@ -295,9 +299,20 @@ def _t_value_95(df: int) -> float:
     """Approximate t-value for 95% CI given degrees of freedom."""
     # Simplified lookup for small df
     t_table = {
-        1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57,
-        6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26, 10: 2.23,
-        15: 2.13, 20: 2.09, 25: 2.06, 30: 2.04,
+        1: 12.71,
+        2: 4.30,
+        3: 3.18,
+        4: 2.78,
+        5: 2.57,
+        6: 2.45,
+        7: 2.36,
+        8: 2.31,
+        9: 2.26,
+        10: 2.23,
+        15: 2.13,
+        20: 2.09,
+        25: 2.06,
+        30: 2.04,
     }
     if df in t_table:
         return t_table[df]

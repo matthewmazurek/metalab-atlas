@@ -67,23 +67,23 @@ export function PlotBuilder() {
   // Aggregate request for non-histogram charts
   const aggregateRequest = plotConfig && !isHistogram
     ? {
-        filter: filter,
-        x_field: plotConfig.x_field,
-        y_field: plotConfig.y_field,
-        group_by: plotConfig.group_by.length > 0 ? plotConfig.group_by : undefined,
-        agg_fn: plotConfig.agg_fn,
-        error_bars: plotConfig.error_bars,
-        reduce_replicates: plotConfig.reduce_replicates,
-      }
+      filter: filter,
+      x_field: plotConfig.x_field,
+      y_field: plotConfig.y_field,
+      group_by: plotConfig.group_by.length > 0 ? plotConfig.group_by : undefined,
+      agg_fn: plotConfig.agg_fn,
+      error_bars: plotConfig.error_bars,
+      reduce_replicates: plotConfig.reduce_replicates,
+    }
     : null;
 
   // Histogram request
   const histogramRequest = plotConfig && isHistogram
     ? {
-        filter: filter,
-        field: plotConfig.y_field,
-        bin_count: plotConfig.bin_count,
-      }
+      filter: filter,
+      field: plotConfig.y_field,
+      bin_count: plotConfig.bin_count,
+    }
     : null;
 
   const {

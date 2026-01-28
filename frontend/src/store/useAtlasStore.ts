@@ -38,6 +38,8 @@ interface AtlasUIState {
   // UI preferences
   pinnedColumns: string[];
   darkMode: boolean;
+  sidebarCollapsed: boolean;
+  visibleColumns: Record<string, string[]>; // experiment_id -> visible column IDs
 
   // Filter state (synced with URL)
   filter: FilterSpec;
@@ -56,6 +58,9 @@ interface AtlasUIState {
   setBaselineRunId: (id: string | null) => void;
   setPinnedColumns: (columns: string[]) => void;
   toggleDarkMode: () => void;
+  toggleSidebar: () => void;
+  setVisibleColumns: (experimentId: string, columns: string[]) => void;
+  getVisibleColumns: (experimentId: string) => string[] | undefined;
   setFilter: (filter: FilterSpec) => void;
   updateFilter: (partial: Partial<FilterSpec>) => void;
   setPlotConfig: (config: PlotConfig | null) => void;
@@ -77,6 +82,8 @@ export const useAtlasStore = create<AtlasUIState>()(
       baselineRunId: null,
       pinnedColumns: ['record.status', 'record.duration_ms'],
       darkMode: false,
+      sidebarCollapsed: false,
+      visibleColumns: {},
       filter: {},
       tableSort: { field: 'record.started_at', order: 'desc' },
       columnFilters: [],
@@ -100,6 +107,18 @@ export const useAtlasStore = create<AtlasUIState>()(
 
       toggleDarkMode: () =>
         set((state) => ({ darkMode: !state.darkMode })),
+
+      toggleSidebar: () =>
+        set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+      setVisibleColumns: (experimentId, columns) =>
+        set((state) => ({
+          visibleColumns: { ...state.visibleColumns, [experimentId]: columns },
+        })),
+
+      getVisibleColumns: (experimentId) => {
+        return get().visibleColumns[experimentId];
+      },
 
       setFilter: (filter) => set({ filter }),
 
@@ -174,6 +193,8 @@ export const useAtlasStore = create<AtlasUIState>()(
       partialize: (state) => ({
         pinnedColumns: state.pinnedColumns,
         darkMode: state.darkMode,
+        sidebarCollapsed: state.sidebarCollapsed,
+        visibleColumns: state.visibleColumns,
       }),
     }
   )

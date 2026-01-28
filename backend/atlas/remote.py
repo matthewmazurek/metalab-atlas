@@ -654,7 +654,9 @@ class RemoteStoreAdapter:
                         elif ff.op == FilterOp.CONTAINS:
                             match = str(ff.value).lower() in str(value).lower()
                         elif ff.op == FilterOp.IN:
-                            match = value in ff.value
+                            # Convert value to string for comparison since field index
+                            # stores values as strings (e.g., bool True -> "True")
+                            match = str(value) in ff.value
                     except (TypeError, ValueError):
                         continue
 
@@ -756,7 +758,7 @@ class RemoteStoreAdapter:
                 value = getattr(run.record, key, None)
                 if value is not None:
                     # Convert enum values to their string value
-                    if hasattr(value, 'value'):
+                    if hasattr(value, "value"):
                         value = value.value
                     if key not in record_fields:
                         record_fields[key] = {
@@ -776,9 +778,7 @@ class RemoteStoreAdapter:
             metrics_fields={
                 k: self._to_field_info(v) for k, v in metrics_fields.items()
             },
-            record_fields={
-                k: self._to_field_info(v) for k, v in record_fields.items()
-            },
+            record_fields={k: self._to_field_info(v) for k, v in record_fields.items()},
         )
 
     def _infer_type(self, value: Any) -> FieldType:
@@ -998,6 +998,45 @@ class RemoteStoreAdapter:
             return self._conn.read_text(legacy_path)
         except FileNotFoundError:
             return None
+
+    def list_logs(self, run_id: str) -> list[str]:
+        """
+        List available log names for a run.
+
+        Searches for logs in both new flat format and legacy nested format.
+        """
+        logs_dir = self._remote_join("logs")
+        short_id = run_id[:8]
+        log_names: set[str] = set()
+
+        # Search new flat format
+        try:
+            files = self._conn.listdir(logs_dir)
+            for f in files:
+                if not f.endswith(".log"):
+                    continue
+                filename = f[:-4]  # Remove .log extension
+                # Pattern: {label}_{short_id}_{name} or {run_id}_{name}
+                if f"_{short_id}_" in filename:
+                    name = filename.split(f"_{short_id}_", 1)[-1]
+                    log_names.add(name)
+                elif filename.startswith(f"{run_id}_"):
+                    name = filename[len(run_id) + 1 :]
+                    log_names.add(name)
+        except FileNotFoundError:
+            pass  # logs dir might not exist
+
+        # Search legacy nested format
+        legacy_dir = self._remote_join("logs", run_id)
+        try:
+            files = self._conn.listdir(legacy_dir)
+            for f in files:
+                if f.endswith(".txt"):
+                    log_names.add(f[:-4])  # Remove .txt extension
+        except FileNotFoundError:
+            pass
+
+        return sorted(log_names)
 
     def list_experiments(self) -> list[tuple[str, int, datetime | None]]:
         """List all experiments with counts."""

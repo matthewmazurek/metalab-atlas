@@ -21,17 +21,17 @@ logging.basicConfig(
 # Reduce noise from other libraries
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-
 from atlas.routers import (
     aggregate_router,
     artifacts_router,
+    experiments_router,
     histogram_router,
     meta_router,
     runs_router,
 )
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 # Path to bundled static files
 STATIC_DIR = Path(__file__).parent / "static"
@@ -62,6 +62,7 @@ app.include_router(artifacts_router)
 app.include_router(meta_router)
 app.include_router(aggregate_router)
 app.include_router(histogram_router)
+app.include_router(experiments_router)
 
 
 @app.get("/api/health")
@@ -92,6 +93,7 @@ if STATIC_DIR.exists():
             return FileResponse(file_path)
         # Return index.html for SPA routing
         return FileResponse(STATIC_DIR / "index.html")
+
 else:
     # No bundled frontend - show helpful message
     @app.get("/")

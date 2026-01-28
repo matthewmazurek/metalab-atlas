@@ -6,11 +6,16 @@ import { ArtifactList } from '@/components/detail/ArtifactList';
 import { LogViewer } from '@/components/detail/LogViewer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { PageTitle } from '@/components/ui/typography';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
+  // Run query auto-polls every 5s when status is 'running'
   const { data: run, isLoading, isError } = useRun(runId || '');
+
+  // Derived state for child components
+  const isRunning = run?.record.status === 'running';
 
   if (isLoading) {
     return (
@@ -23,7 +28,7 @@ export function RunDetailPage() {
   if (isError || !run) {
     return (
       <div className="space-y-4">
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to runs
@@ -47,14 +52,14 @@ export function RunDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to="/">
+        <Link to="/runs">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
         </Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold font-mono">{run.record.run_id}</h1>
+          <PageTitle className="font-mono">{run.record.run_id}</PageTitle>
           <div className="text-muted-foreground">{run.record.experiment_id}</div>
         </div>
         <StatusBadge status={run.record.status} />
@@ -73,11 +78,11 @@ export function RunDetailPage() {
             </div>
             <div>
               <div className="text-sm text-muted-foreground">Finished</div>
-              <div>{formatDate(run.record.finished_at)}</div>
+              <div>{run.record.finished_at ? formatDate(run.record.finished_at) : '—'}</div>
             </div>
             <div>
               <div className="text-sm text-muted-foreground">Duration</div>
-              <div>{formatDuration(run.record.duration_ms)}</div>
+              <div>{run.record.duration_ms != null ? formatDuration(run.record.duration_ms) : '—'}</div>
             </div>
             <div>
               <div className="text-sm text-muted-foreground">Executor</div>
@@ -151,8 +156,8 @@ export function RunDetailPage() {
       {/* Artifacts */}
       <ArtifactList runId={run.record.run_id} artifacts={run.artifacts} />
 
-      {/* Logs */}
-      <LogViewer runId={run.record.run_id} />
+      {/* Logs - polls every 5s when run is active */}
+      <LogViewer runId={run.record.run_id} isRunning={isRunning} />
     </div>
   );
 }

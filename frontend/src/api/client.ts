@@ -13,13 +13,15 @@ import type {
   FilterSpec,
   HistogramRequest,
   HistogramResponse,
+  ManifestListResponse,
+  ManifestResponse,
   RunListResponse,
   RunResponse,
 } from './types';
 
 // Base URL for API
 // In production (bundled), use same origin. In dev, use localhost:8000
-const API_BASE = import.meta.env.VITE_API_URL || 
+const API_BASE = import.meta.env.VITE_API_URL ||
   (import.meta.env.PROD ? '' : 'http://localhost:8000');
 
 export const api = axios.create({
@@ -118,6 +120,15 @@ export async function fetchLog(
   return response.data;
 }
 
+export async function fetchLogsList(
+  runId: string
+): Promise<{ logs: string[] }> {
+  const response = await api.get<{ logs: string[] }>(
+    `/api/runs/${runId}/logs`
+  );
+  return response.data;
+}
+
 export async function fetchFields(experimentId?: string): Promise<FieldIndex> {
   const params = experimentId ? `?experiment_id=${experimentId}` : '';
   const response = await api.get<FieldIndex>(`/api/meta/fields${params}`);
@@ -136,5 +147,38 @@ export async function fetchAggregate(request: AggregateRequest): Promise<Aggrega
 
 export async function fetchHistogram(request: HistogramRequest): Promise<HistogramResponse> {
   const response = await api.post<HistogramResponse>('/api/histogram', request);
+  return response.data;
+}
+
+export async function refreshStores(): Promise<{ stores_discovered: number; message: string }> {
+  const response = await api.post<{ stores_discovered: number; message: string }>('/api/meta/refresh');
+  return response.data;
+}
+
+export async function fetchExperimentManifests(
+  experimentId: string
+): Promise<ManifestListResponse> {
+  const response = await api.get<ManifestListResponse>(
+    `/api/experiments/${encodeURIComponent(experimentId)}/manifests`
+  );
+  return response.data;
+}
+
+export async function fetchLatestManifest(
+  experimentId: string
+): Promise<ManifestResponse> {
+  const response = await api.get<ManifestResponse>(
+    `/api/experiments/${encodeURIComponent(experimentId)}/manifests/latest`
+  );
+  return response.data;
+}
+
+export async function fetchManifest(
+  experimentId: string,
+  timestamp: string
+): Promise<ManifestResponse> {
+  const response = await api.get<ManifestResponse>(
+    `/api/experiments/${encodeURIComponent(experimentId)}/manifests/${timestamp}`
+  );
   return response.data;
 }

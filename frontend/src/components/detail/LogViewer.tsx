@@ -3,16 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useLog } from '@/api/hooks';
-import { Search } from 'lucide-react';
+import { useLog, useLogsList } from '@/api/hooks';
+import { Search, FileText, RefreshCw } from 'lucide-react';
 
 interface LogViewerProps {
   runId: string;
+  isRunning?: boolean;
 }
 
-function LogContent({ runId, logName }: { runId: string; logName: string }) {
+function LogContent({ runId, logName, isRunning = false }: { runId: string; logName: string; isRunning?: boolean }) {
   const [search, setSearch] = useState('');
-  const { data, isLoading, isError } = useLog(runId, logName);
+  const { data, isLoading, isError } = useLog(runId, logName, isRunning);
 
   if (isLoading) {
     return <div className="p-4 text-muted-foreground">Loading...</div>;
@@ -47,24 +48,71 @@ function LogContent({ runId, logName }: { runId: string; logName: string }) {
   );
 }
 
-export function LogViewer({ runId }: LogViewerProps) {
+export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
+  const { data: logsData, isLoading, isError } = useLogsList(runId, isRunning);
+  const logs = logsData?.logs || [];
+
+  // If no logs available, show placeholder
+  if (!isLoading && (isError || logs.length === 0)) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Logs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+            <FileText className="h-12 w-12 mb-2 opacity-50" />
+            <p>No logs available for this run</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Logs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="p-4 text-muted-foreground">Loading logs...</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Default to first available log
+  const defaultLog = logs[0];
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Logs</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          Logs
+          {isRunning && (
+            <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Auto-refresh
+            </span>
+          )}
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="stdout">
+        <Tabs defaultValue={defaultLog}>
           <TabsList>
-            <TabsTrigger value="stdout">stdout</TabsTrigger>
-            <TabsTrigger value="stderr">stderr</TabsTrigger>
+            {logs.map((logName) => (
+              <TabsTrigger key={logName} value={logName}>
+                {logName}
+              </TabsTrigger>
+            ))}
           </TabsList>
-          <TabsContent value="stdout">
-            <LogContent runId={runId} logName="stdout" />
-          </TabsContent>
-          <TabsContent value="stderr">
-            <LogContent runId={runId} logName="stderr" />
-          </TabsContent>
+          {logs.map((logName) => (
+            <TabsContent key={logName} value={logName}>
+              <LogContent runId={runId} logName={logName} isRunning={isRunning} />
+            </TabsContent>
+          ))}
         </Tabs>
       </CardContent>
     </Card>

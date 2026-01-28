@@ -79,6 +79,23 @@ async def get_artifact_preview(
         )
 
 
+@router.get("/logs")
+async def list_logs(
+    run_id: str,
+    store: Annotated[StoreAdapter, Depends(get_store)],
+) -> dict:
+    """
+    List available log names for a run.
+
+    Returns a list of log names (e.g., ["run", "stdout", "stderr"]).
+    """
+    log_names = store.list_logs(run_id)
+    return {
+        "run_id": run_id,
+        "logs": log_names,
+    }
+
+
 @router.get("/logs/{log_name}")
 async def get_log(
     run_id: str,

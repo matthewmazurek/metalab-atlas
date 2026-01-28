@@ -78,7 +78,11 @@ class FieldIndexer:
         data = json.loads(self._index_path.read_text())
         return FieldIndex(
             version=data.get("version", 1),
-            last_scan=datetime.fromisoformat(data["last_scan"]) if data.get("last_scan") else None,
+            last_scan=(
+                datetime.fromisoformat(data["last_scan"])
+                if data.get("last_scan")
+                else None
+            ),
             run_count=data.get("run_count", 0),
             params_fields={
                 k: FieldInfo(**v) for k, v in data.get("params_fields", {}).items()
@@ -156,9 +160,15 @@ class FieldIndexer:
             version=1,
             last_scan=datetime.now(),
             run_count=run_count,
-            params_fields={k: self._stats_to_field_info(v) for k, v in params_stats.items()},
-            metrics_fields={k: self._stats_to_field_info(v) for k, v in metrics_stats.items()},
-            record_fields={k: self._stats_to_field_info(v) for k, v in record_stats.items()},
+            params_fields={
+                k: self._stats_to_field_info(v) for k, v in params_stats.items()
+            },
+            metrics_fields={
+                k: self._stats_to_field_info(v) for k, v in metrics_stats.items()
+            },
+            record_fields={
+                k: self._stats_to_field_info(v) for k, v in record_stats.items()
+            },
         )
 
     def _init_stats(self, value: Any) -> dict:

@@ -9,15 +9,21 @@ import {
   fetchArtifacts,
   fetchArtifactPreview,
   fetchLog,
+  fetchLogsList,
   fetchFields,
   fetchExperiments,
   fetchAggregate,
   fetchHistogram,
+  fetchExperimentManifests,
+  fetchLatestManifest,
 } from './client';
 import type { AggregateRequest, FilterSpec, HistogramRequest } from './types';
 
 // Auto-refresh interval for list views (30 seconds)
 const REFETCH_INTERVAL = 30 * 1000;
+
+// Faster refresh for active/running items (5 seconds)
+const ACTIVE_REFETCH_INTERVAL = 5 * 1000;
 
 // Query keys
 export const queryKeys = {
@@ -33,10 +39,15 @@ export const queryKeys = {
   artifactPreview: (runId: string, artifactName: string) =>
     ['artifactPreview', runId, artifactName] as const,
   log: (runId: string, logName: string) => ['log', runId, logName] as const,
+  logsList: (runId: string) => ['logsList', runId] as const,
   fields: (experimentId?: string) => ['fields', experimentId] as const,
   experiments: () => ['experiments'] as const,
   aggregate: (request: AggregateRequest) => ['aggregate', request] as const,
   histogram: (request: HistogramRequest) => ['histogram', request] as const,
+  experimentManifests: (experimentId: string) =>
+    ['experimentManifests', experimentId] as const,
+  latestManifest: (experimentId: string) =>
+    ['latestManifest', experimentId] as const,
 };
 
 // Hooks
@@ -59,6 +70,9 @@ export function useRun(runId: string) {
     queryKey: queryKeys.run(runId),
     queryFn: () => fetchRun(runId),
     enabled: !!runId,
+    // Auto-poll when run is active
+    refetchInterval: (query) =>
+      query.state.data?.record.status === 'running' ? ACTIVE_REFETCH_INTERVAL : false,
   });
 }
 
@@ -78,11 +92,21 @@ export function useArtifactPreview(runId: string, artifactName: string) {
   });
 }
 
-export function useLog(runId: string, logName: string) {
+export function useLog(runId: string, logName: string, isRunning = false) {
   return useQuery({
     queryKey: queryKeys.log(runId, logName),
     queryFn: () => fetchLog(runId, logName),
     enabled: !!runId && !!logName,
+    refetchInterval: isRunning ? ACTIVE_REFETCH_INTERVAL : false,
+  });
+}
+
+export function useLogsList(runId: string, isRunning = false) {
+  return useQuery({
+    queryKey: queryKeys.logsList(runId),
+    queryFn: () => fetchLogsList(runId),
+    enabled: !!runId,
+    refetchInterval: isRunning ? ACTIVE_REFETCH_INTERVAL : false,
   });
 }
 
@@ -115,5 +139,21 @@ export function useHistogram(request: HistogramRequest, enabled = true) {
     queryKey: queryKeys.histogram(request),
     queryFn: () => fetchHistogram(request),
     enabled: enabled && !!request.field,
+  });
+}
+
+export function useExperimentManifests(experimentId: string) {
+  return useQuery({
+    queryKey: queryKeys.experimentManifests(experimentId),
+    queryFn: () => fetchExperimentManifests(experimentId),
+    enabled: !!experimentId,
+  });
+}
+
+export function useLatestManifest(experimentId: string) {
+  return useQuery({
+    queryKey: queryKeys.latestManifest(experimentId),
+    queryFn: () => fetchLatestManifest(experimentId),
+    enabled: !!experimentId,
   });
 }

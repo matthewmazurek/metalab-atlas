@@ -17,7 +17,7 @@ export function MetricsGrid({ title, data }: MetricsGridProps) {
       return Number.isInteger(value) ? value.toString() : value.toFixed(6);
     }
     if (typeof value === 'boolean') {
-      return value ? 'true' : 'false';
+      return value ? 'True' : 'False';
     }
     return String(value);
   };

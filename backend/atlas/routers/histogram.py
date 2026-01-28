@@ -7,11 +7,10 @@ from __future__ import annotations
 from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, Depends
-
 from atlas.aggregate import get_field_value
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import HistogramRequest, HistogramResponse
+from fastapi import APIRouter, Depends
 
 router = APIRouter(prefix="/api", tags=["histogram"])
 

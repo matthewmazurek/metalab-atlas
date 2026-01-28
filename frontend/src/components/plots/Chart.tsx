@@ -89,6 +89,7 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       <ReactECharts
         option={option}
         style={{ height: '400px', width: '100%' }}
+        notMerge={true}
       />
     );
   }
@@ -140,6 +141,7 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
     <ReactECharts
       option={option}
       style={{ height: '400px', width: '100%' }}
+      notMerge={true}
       onEvents={{ click: handleClick }}
     />
   );

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getArtifactDownloadUrl } from '@/api/client';
 import { useArtifactPreview } from '@/api/hooks';
 import type { ArtifactInfo } from '@/api/types';
@@ -14,7 +14,7 @@ interface ArtifactListProps {
   artifacts: ArtifactInfo[];
 }
 
-function getArtifactIcon(kind: string) {
+export function getArtifactIcon(kind: string) {
   switch (kind) {
     case 'json':
       return FileCode;
@@ -36,7 +36,7 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ArtifactPreviewDialog({
+export function ArtifactPreviewDialog({
   runId,
   artifact,
   open,
@@ -49,14 +49,31 @@ function ArtifactPreviewDialog({
 }) {
   const { data: preview, isLoading } = useArtifactPreview(runId, artifact.name);
 
+  // For images, load the full image directly instead of the thumbnail
+  const isImage = artifact.kind === 'image';
+  const imageUrl = isImage ? getArtifactDownloadUrl(runId, artifact.name) : null;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[80vh]">
+      <DialogContent className={isImage ? "sm:max-w-[90vw] max-h-[90vh]" : "sm:max-w-3xl max-h-[80vh]"}>
         <DialogHeader>
-          <DialogTitle>{artifact.name}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {artifact.name}
+            <span className="text-xs text-muted-foreground font-normal">
+              ({artifact.kind} / {artifact.format})
+            </span>
+          </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh]">
-          {isLoading ? (
+        <ScrollArea className={isImage ? "max-h-[75vh]" : "max-h-[60vh]"}>
+          {isImage && imageUrl ? (
+            <div className="p-4 flex justify-center items-center">
+              <img
+                src={imageUrl}
+                alt={artifact.name}
+                className="max-w-full max-h-[70vh] object-contain"
+              />
+            </div>
+          ) : isLoading ? (
             <div className="p-4 text-center text-muted-foreground">Loading preview...</div>
           ) : preview?.preview?.json_content ? (
             <pre className="p-4 bg-muted rounded text-sm overflow-auto">
@@ -73,11 +90,11 @@ function ArtifactPreviewDialog({
               {preview.preview.text_content}
             </pre>
           ) : preview?.preview?.image_thumbnail ? (
-            <div className="p-4 flex justify-center">
+            <div className="p-4 flex justify-center items-center">
               <img
                 src={`data:image/${artifact.format};base64,${preview.preview.image_thumbnail}`}
                 alt={artifact.name}
-                className="max-w-full"
+                className="max-w-full max-h-[70vh] object-contain"
               />
             </div>
           ) : (
@@ -86,6 +103,17 @@ function ArtifactPreviewDialog({
             </div>
           )}
         </ScrollArea>
+        <DialogFooter>
+          <Button variant="outline" asChild>
+            <a
+              href={getArtifactDownloadUrl(runId, artifact.name)}
+              download={artifact.name}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </a>
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

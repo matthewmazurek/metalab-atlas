@@ -15,7 +15,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Enums
 # =============================================================================
@@ -27,6 +26,7 @@ class RunStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    RUNNING = "running"
 
 
 class FilterOp(str, Enum):
@@ -79,7 +79,10 @@ class FieldType(str, Enum):
 class FieldFilter(BaseModel):
     """Filter for any namespaced field."""
 
-    field: str = Field(..., description="Dot-notation field path (e.g., 'metrics.best_f', 'params.dim')")
+    field: str = Field(
+        ...,
+        description="Dot-notation field path (e.g., 'metrics.best_f', 'params.dim')",
+    )
     op: FilterOp = Field(default=FilterOp.EQ, description="Comparison operator")
     value: Any = Field(..., description="Value to compare against")
 
@@ -87,11 +90,21 @@ class FieldFilter(BaseModel):
 class FilterSpec(BaseModel):
     """Specification for filtering runs."""
 
-    experiment_id: str | None = Field(default=None, description="Filter by experiment ID")
-    status: list[RunStatus] | None = Field(default=None, description="Filter by status(es)")
-    started_after: datetime | None = Field(default=None, description="Runs started after this time")
-    started_before: datetime | None = Field(default=None, description="Runs started before this time")
-    field_filters: list[FieldFilter] | None = Field(default=None, description="Filters on params/metrics fields")
+    experiment_id: str | None = Field(
+        default=None, description="Filter by experiment ID"
+    )
+    status: list[RunStatus] | None = Field(
+        default=None, description="Filter by status(es)"
+    )
+    started_after: datetime | None = Field(
+        default=None, description="Runs started after this time"
+    )
+    started_before: datetime | None = Field(
+        default=None, description="Runs started before this time"
+    )
+    field_filters: list[FieldFilter] | None = Field(
+        default=None, description="Filters on params/metrics fields"
+    )
 
 
 # =============================================================================
@@ -120,8 +133,8 @@ class RecordFields(BaseModel):
     params_fingerprint: str
     seed_fingerprint: str
     started_at: datetime
-    finished_at: datetime
-    duration_ms: int
+    finished_at: datetime | None = None  # None for RUNNING status
+    duration_ms: int | None = None  # None for RUNNING status
     provenance: ProvenanceInfo
     error: dict[str, Any] | None = None
     tags: list[str] = Field(default_factory=list)
@@ -192,8 +205,12 @@ class RunResponse(BaseModel):
     """Complete run response with namespaced fields."""
 
     record: RecordFields
-    params: dict[str, Any] = Field(default_factory=dict, description="Resolved parameters (inputs)")
-    metrics: dict[str, Any] = Field(default_factory=dict, description="Captured metrics (outputs)")
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="Resolved parameters (inputs)"
+    )
+    metrics: dict[str, Any] = Field(
+        default_factory=dict, description="Captured metrics (outputs)"
+    )
     artifacts: list[ArtifactInfo] = Field(default_factory=list)
 
 
@@ -201,7 +218,9 @@ class RunListResponse(BaseModel):
     """Paginated list of runs."""
 
     runs: list[RunResponse]
-    total: int = Field(..., description="Total count matching filter (before pagination)")
+    total: int = Field(
+        ..., description="Total count matching filter (before pagination)"
+    )
     limit: int
     offset: int
 
@@ -214,10 +233,14 @@ class RunListResponse(BaseModel):
 class AggregateRequest(BaseModel):
     """Request for aggregated plot data."""
 
-    filter: FilterSpec | None = Field(default=None, description="Filter to apply before aggregation")
+    filter: FilterSpec | None = Field(
+        default=None, description="Filter to apply before aggregation"
+    )
     x_field: str = Field(..., description="Field for X axis (e.g., 'params.dim')")
     y_field: str = Field(..., description="Field for Y axis (e.g., 'metrics.best_f')")
-    group_by: list[str] | None = Field(default=None, description="Fields to group by (e.g., ['params.algorithm'])")
+    group_by: list[str] | None = Field(
+        default=None, description="Fields to group by (e.g., ['params.algorithm'])"
+    )
 
     # Replicate handling
     replicate_field: str = Field(
@@ -231,7 +254,9 @@ class AggregateRequest(BaseModel):
 
     # Aggregation settings
     agg_fn: AggFn = Field(default=AggFn.MEAN, description="Aggregation function")
-    error_bars: ErrorBarType = Field(default=ErrorBarType.STD, description="Error bar computation method")
+    error_bars: ErrorBarType = Field(
+        default=ErrorBarType.STD, description="Error bar computation method"
+    )
 
 
 class DataPoint(BaseModel):
@@ -242,13 +267,19 @@ class DataPoint(BaseModel):
     y_low: float | None = None
     y_high: float | None = None
     n: int = Field(..., description="Number of runs aggregated")
-    run_ids: list[str] | None = Field(default=None, description="IDs of runs in this aggregate")
+    run_ids: list[str] | None = Field(
+        default=None, description="IDs of runs in this aggregate"
+    )
 
     # Quartile fields for distribution visualization (candlestick/box plots)
     y_min: float | None = Field(default=None, description="Minimum Y value")
-    y_q1: float | None = Field(default=None, description="First quartile (25th percentile)")
+    y_q1: float | None = Field(
+        default=None, description="First quartile (25th percentile)"
+    )
     y_median: float | None = Field(default=None, description="Median (50th percentile)")
-    y_q3: float | None = Field(default=None, description="Third quartile (75th percentile)")
+    y_q3: float | None = Field(
+        default=None, description="Third quartile (75th percentile)"
+    )
     y_max: float | None = Field(default=None, description="Maximum Y value")
 
 
@@ -277,8 +308,12 @@ class AggregateResponse(BaseModel):
 class HistogramRequest(BaseModel):
     """Request for histogram data."""
 
-    filter: FilterSpec | None = Field(default=None, description="Filter to apply before binning")
-    field: str = Field(..., description="Field to compute histogram for (e.g., 'metrics.accuracy')")
+    filter: FilterSpec | None = Field(
+        default=None, description="Filter to apply before binning"
+    )
+    field: str = Field(
+        ..., description="Field to compute histogram for (e.g., 'metrics.accuracy')"
+    )
     bin_count: int = Field(default=20, ge=1, le=100, description="Number of bins")
 
 
@@ -301,9 +336,15 @@ class FieldInfo(BaseModel):
 
     type: FieldType
     count: int = Field(..., description="Number of runs with this field")
-    values: list[str] | None = Field(default=None, description="Unique values (for categorical/string fields)")
-    min_value: float | None = Field(default=None, description="Minimum value (for numeric fields)")
-    max_value: float | None = Field(default=None, description="Maximum value (for numeric fields)")
+    values: list[str] | None = Field(
+        default=None, description="Unique values (for categorical/string fields)"
+    )
+    min_value: float | None = Field(
+        default=None, description="Minimum value (for numeric fields)"
+    )
+    max_value: float | None = Field(
+        default=None, description="Maximum value (for numeric fields)"
+    )
 
 
 class FieldIndex(BaseModel):
@@ -334,3 +375,49 @@ class ExperimentsResponse(BaseModel):
     """List of experiments."""
 
     experiments: list[ExperimentInfo]
+
+
+# =============================================================================
+# Manifest Models
+# =============================================================================
+
+
+class ManifestInfo(BaseModel):
+    """Basic manifest metadata for listing."""
+
+    experiment_id: str
+    timestamp: str  # "20260127_103000"
+    submitted_at: datetime
+    total_runs: int
+
+
+class ManifestListResponse(BaseModel):
+    """List of manifest versions."""
+
+    manifests: list[ManifestInfo]
+
+
+class OperationInfo(BaseModel):
+    """Operation reference in manifest."""
+
+    ref: str | None = None
+    name: str | None = None
+    code_hash: str | None = None
+
+
+class ManifestResponse(BaseModel):
+    """Full experiment manifest."""
+
+    experiment_id: str
+    name: str | None = None
+    version: str | None = None
+    description: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    operation: OperationInfo | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    seeds: dict[str, Any] = Field(default_factory=dict)
+    context_fingerprint: str | None = None
+    runtime_hints: dict[str, Any] | None = None
+    total_runs: int = 0
+    run_ids: list[str] | None = None
+    submitted_at: datetime | None = None

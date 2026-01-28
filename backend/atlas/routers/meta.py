@@ -4,19 +4,20 @@ Meta API router: Field discovery and experiment listing.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
-
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from atlas.deps import StoreAdapter, get_store, refresh_stores
 from atlas.models import ExperimentInfo, ExperimentsResponse, FieldIndex
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
 class RefreshResponse(BaseModel):
     """Response from store refresh."""
+
     stores_discovered: int
     message: str
 
@@ -25,7 +26,7 @@ class RefreshResponse(BaseModel):
 async def refresh_store_discovery() -> RefreshResponse:
     """
     Refresh store discovery to pick up new experiments.
-    
+
     Call this endpoint after adding new experiments to the store directory
     without needing to restart the server.
     """
@@ -80,7 +81,10 @@ async def list_experiments(
         for exp_id, count, latest in experiments_data
     ]
 
-    # Sort by latest run (most recent first)
-    experiments.sort(key=lambda e: e.latest_run or "", reverse=True)
+    # Sort by latest run (most recent first), experiments without runs go to the end
+    experiments.sort(
+        key=lambda e: (e.latest_run is not None, e.latest_run or datetime.min),
+        reverse=True,
+    )
 
     return ExperimentsResponse(experiments=experiments)

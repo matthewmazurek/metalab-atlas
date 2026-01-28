@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { BarChart3, GitCompare, LayoutList, Moon, Sun } from 'lucide-react';
+import { BarChart3, Beaker, GitCompare, LayoutList, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
 
 const navItems = [
-  { path: '/', label: 'Runs', icon: LayoutList },
+  { path: '/experiments', label: 'Experiments', icon: Beaker },
+  { path: '/runs', label: 'Runs', icon: LayoutList },
   { path: '/plots', label: 'Plots', icon: BarChart3 },
   { path: '/compare', label: 'Compare', icon: GitCompare },
 ];
