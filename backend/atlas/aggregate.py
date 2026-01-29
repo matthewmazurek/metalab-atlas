@@ -35,6 +35,8 @@ def get_field_value(run: RunResponse, field_path: str) -> Any:
         return run.params.get(key)
     elif namespace == "metrics":
         return run.metrics.get(key)
+    elif namespace == "derived":
+        return run.derived_metrics.get(key)
 
     return None
 

@@ -27,18 +27,18 @@ async def list_manifests(
     return ManifestListResponse(manifests=manifests)
 
 
-@router.get("/{experiment_id}/manifests/latest", response_model=ManifestResponse)
+@router.get("/{experiment_id}/manifests/latest", response_model=ManifestResponse | None)
 async def get_latest_manifest(
     experiment_id: str,
     store: Annotated[StoreAdapter, Depends(get_store)],
-) -> ManifestResponse:
+) -> ManifestResponse | None:
     """
     Get the most recent manifest for an experiment.
+
+    Returns null if no manifest exists (this is expected for experiments
+    that were run before manifests were introduced).
     """
-    manifest = store.get_experiment_manifest(experiment_id, timestamp=None)
-    if manifest is None:
-        raise HTTPException(status_code=404, detail="No manifest found for experiment")
-    return manifest
+    return store.get_experiment_manifest(experiment_id, timestamp=None)
 
 
 @router.get("/{experiment_id}/manifests/{timestamp}", response_model=ManifestResponse)

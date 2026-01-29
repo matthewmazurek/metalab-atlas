@@ -1,5 +1,5 @@
 """
-Pydantic models for Metalab Atlas API.
+Pydantic models for MetaLab Atlas API.
 
 Namespacing convention:
 - record.*: Core run fields (run_id, experiment_id, status, timestamps, etc.)
@@ -211,6 +211,10 @@ class RunResponse(BaseModel):
     metrics: dict[str, Any] = Field(
         default_factory=dict, description="Captured metrics (outputs)"
     )
+    derived_metrics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Post-hoc derived metrics (computed from artifacts)",
+    )
     artifacts: list[ArtifactInfo] = Field(default_factory=list)
 
 
@@ -355,6 +359,7 @@ class FieldIndex(BaseModel):
     run_count: int = 0
     params_fields: dict[str, FieldInfo] = Field(default_factory=dict)
     metrics_fields: dict[str, FieldInfo] = Field(default_factory=dict)
+    derived_fields: dict[str, FieldInfo] = Field(default_factory=dict)
     record_fields: dict[str, FieldInfo] = Field(default_factory=dict)
 
 
@@ -417,7 +422,7 @@ class ManifestResponse(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     seeds: dict[str, Any] = Field(default_factory=dict)
     context_fingerprint: str | None = None
-    runtime_hints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
     total_runs: int = 0
     run_ids: list[str] | None = None
     submitted_at: datetime | None = None

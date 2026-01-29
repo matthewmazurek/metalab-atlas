@@ -1,6 +1,5 @@
 import { useExperiments, useFields, useLatestManifest, useRuns } from '@/api/hooks';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   Select,
@@ -135,9 +134,9 @@ export function FilterPanel() {
   const metricsEntries = Object.entries(fieldsData?.metrics_fields || {});
 
   return (
-    <div className="border rounded-lg bg-card flex flex-col max-h-[calc(100vh-10rem)]">
+    <div className="border rounded-lg bg-card">
       {/* Header - h-10 matches table header height */}
-      <div className="flex items-center justify-between h-10 px-3 border-b shrink-0">
+      <div className="flex items-center justify-between h-10 px-3 border-b">
         <PanelTitle>Experiment</PanelTitle>
         <Button
           variant="ghost"
@@ -150,124 +149,122 @@ export function FilterPanel() {
         </Button>
       </div>
 
-      {/* Scrollable content */}
-      <ScrollArea className="flex-1">
-        <div className="p-3 space-y-4">
-          {/* Experiment dropdown selector */}
-          <Select
-            value={filter.experiment_id || 'all'}
-            onValueChange={(value) =>
-              updateFilter({ experiment_id: value === 'all' ? null : value })
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="All experiments" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All experiments ({totalRuns})</SelectItem>
-              {experimentsData?.experiments.map((exp) => (
-                <SelectItem key={exp.experiment_id} value={exp.experiment_id}>
-                  {exp.experiment_id} ({exp.run_count})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {/* Content */}
+      <div className="p-3 space-y-4">
+        {/* Experiment dropdown selector */}
+        <Select
+          value={filter.experiment_id || 'all'}
+          onValueChange={(value) =>
+            updateFilter({ experiment_id: value === 'all' ? null : value })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="All experiments" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All experiments ({totalRuns})</SelectItem>
+            {experimentsData?.experiments.map((exp) => (
+              <SelectItem key={exp.experiment_id} value={exp.experiment_id}>
+                {exp.experiment_id} ({exp.run_count})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-          {/* Metadata section - only show when experiment is selected */}
-          {selectedExperiment && fieldsData && (
-            <>
-              {/* Overview stats */}
-              <div className="space-y-2">
-                <SectionLabel>Overview</SectionLabel>
+        {/* Metadata section - only show when experiment is selected */}
+        {selectedExperiment && fieldsData && (
+          <>
+            {/* Overview stats */}
+            <div className="space-y-2">
+              <SectionLabel>Overview</SectionLabel>
 
-                {/* Run counts: "17 runs ✓ / 72 total" */}
-                <div className="flex items-center gap-1.5 text-sm">
-                  <span className="font-medium">{successCount} runs</span>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-                  {expectedTotal != null && (
-                    <>
-                      <span className="text-muted-foreground">/</span>
-                      <span className="text-muted-foreground">
-                        {expectedTotal} total
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                {/* Active runs or Latest run */}
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  {runningCount > 0 ? (
-                    <>
-                      <span>Active runs</span>
-                      <span>{runningCount}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Latest run</span>
-                      <span>{formatRelativeTime(selectedExperiment.latest_run)}</span>
-                    </>
-                  )}
-                </div>
-
-                {/* Duration info */}
-                {durationField && durationField.min_value != null && durationField.max_value != null && (
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      Duration
+              {/* Run counts: "17 runs ✓ / 72 total" */}
+              <div className="flex items-center gap-1.5 text-sm">
+                <span className="font-medium">{successCount} runs</span>
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                {expectedTotal != null && (
+                  <>
+                    <span className="text-muted-foreground">/</span>
+                    <span className="text-muted-foreground">
+                      {expectedTotal} total
                     </span>
-                    <span className="font-mono">
-                      {durationField.min_value === durationField.max_value
-                        ? formatDuration(durationField.min_value)
-                        : `${formatDuration(durationField.min_value)}–${formatDuration(durationField.max_value)}`}
-                    </span>
-                  </div>
+                  </>
                 )}
               </div>
 
-              {/* Params section */}
-              {paramsEntries.length > 0 && (
-                <>
-                  <Separator />
-                  <div className="space-y-2">
-                    <SectionLabel>Parameters ({paramsEntries.length})</SectionLabel>
-                    <div className="space-y-1">
-                      {paramsEntries.map(([name, info]) => (
-                        <div key={name} className="flex justify-between items-center gap-2 text-xs min-w-0">
-                          <span className="text-muted-foreground truncate" title={name}>
-                            {name}
-                          </span>
-                          <FieldTypeDisplay info={info} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
+              {/* Active runs or Latest run */}
+              <div className="flex justify-between text-xs text-muted-foreground">
+                {runningCount > 0 ? (
+                  <>
+                    <span>Active runs</span>
+                    <span>{runningCount}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Latest run</span>
+                    <span>{formatRelativeTime(selectedExperiment.latest_run)}</span>
+                  </>
+                )}
+              </div>
 
-              {/* Metrics section */}
-              {metricsEntries.length > 0 && (
-                <>
-                  <Separator />
-                  <div className="space-y-2">
-                    <SectionLabel>Metrics ({metricsEntries.length})</SectionLabel>
-                    <div className="space-y-1">
-                      {metricsEntries.map(([name, info]) => (
-                        <div key={name} className="flex justify-between items-center gap-2 text-xs min-w-0">
-                          <span className="text-muted-foreground truncate" title={name}>
-                            {name}
-                          </span>
-                          <FieldTypeDisplay info={info} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
+              {/* Duration info */}
+              {durationField && durationField.min_value != null && durationField.max_value != null && (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Duration
+                  </span>
+                  <span className="font-mono">
+                    {durationField.min_value === durationField.max_value
+                      ? formatDuration(durationField.min_value)
+                      : `${formatDuration(durationField.min_value)}–${formatDuration(durationField.max_value)}`}
+                  </span>
+                </div>
               )}
-            </>
-          )}
-        </div>
-      </ScrollArea>
+            </div>
+
+            {/* Params section */}
+            {paramsEntries.length > 0 && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <SectionLabel>Parameters ({paramsEntries.length})</SectionLabel>
+                  <div className="space-y-1">
+                    {paramsEntries.map(([name, info]) => (
+                      <div key={name} className="flex justify-between items-center gap-2 text-xs min-w-0">
+                        <span className="text-muted-foreground truncate" title={name}>
+                          {name}
+                        </span>
+                        <FieldTypeDisplay info={info} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Metrics section */}
+            {metricsEntries.length > 0 && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <SectionLabel>Metrics ({metricsEntries.length})</SectionLabel>
+                  <div className="space-y-1">
+                    {metricsEntries.map(([name, info]) => (
+                      <div key={name} className="flex justify-between items-center gap-2 text-xs min-w-0">
+                        <span className="text-muted-foreground truncate" title={name}>
+                          {name}
+                        </span>
+                        <FieldTypeDisplay info={info} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

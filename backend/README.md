@@ -1,6 +1,6 @@
 # Atlas Backend
 
-FastAPI server for Metalab Atlas dashboard.
+FastAPI server for MetaLab Atlas dashboard.
 
 ## Setup
 

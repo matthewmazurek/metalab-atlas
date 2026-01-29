@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
 import type { RunResponse, ArtifactInfo } from '@/api/types';
-import { Loader2, Star } from 'lucide-react';
+import { AlertCircle, Loader2, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface CompareTableProps {
@@ -149,21 +149,26 @@ export function CompareTable({ runIds }: CompareTableProps) {
   // Find baseline run data
   const baselineRun = runs.find((r) => r.record.run_id === baselineRunId) ?? null;
 
-  // Collect all unique param, metric, and artifact keys across all runs
-  const { paramKeys, metricKeys, allArtifactNames } = useMemo(() => {
+  // Collect all unique param, metric, derived metric, and artifact keys across all runs
+  const { paramKeys, metricKeys, derivedMetricKeys, allArtifactNames } = useMemo(() => {
     const paramSet = new Set<string>();
     const metricSet = new Set<string>();
+    const derivedSet = new Set<string>();
     const artifactSet = new Set<string>();
 
     for (const run of runs) {
       Object.keys(run.params).forEach((k) => paramSet.add(k));
       Object.keys(run.metrics).forEach((k) => metricSet.add(k));
+      if (run.derived_metrics) {
+        Object.keys(run.derived_metrics).forEach((k) => derivedSet.add(k));
+      }
       run.artifacts?.forEach((a) => artifactSet.add(a.name));
     }
 
     return {
       paramKeys: Array.from(paramSet).sort(),
       metricKeys: Array.from(metricSet).sort(),
+      derivedMetricKeys: Array.from(derivedSet).sort(),
       allArtifactNames: Array.from(artifactSet).sort(),
     };
   }, [runs]);
@@ -178,8 +183,9 @@ export function CompareTable({ runIds }: CompareTableProps) {
 
   if (isError) {
     return (
-      <div className="text-center p-8 text-destructive">
-        Failed to load one or more runs.
+      <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
+        <AlertCircle className="h-8 w-8 mb-2" />
+        <p>Failed to load one or more runs</p>
       </div>
     );
   }
@@ -337,6 +343,36 @@ export function CompareTable({ runIds }: CompareTableProps) {
                         <ValueCell
                           value={run.metrics[key]}
                           baselineValue={baselineRun?.metrics[key]}
+                          showDelta={showDelta}
+                        />
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </>
+          )}
+
+          {/* Derived Metrics section */}
+          {derivedMetricKeys.length > 0 && (
+            <>
+              <SectionRow label="Derived Metrics" colSpan={totalCols} />
+              {derivedMetricKeys.map((key) => (
+                <TableRow key={`derived-${key}`}>
+                  <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+                    {key}
+                  </TableCell>
+                  {runs.map((run) => {
+                    const isBaseline = run.record.run_id === baselineRunId;
+                    const showDelta = !isBaseline && baselineRun !== null;
+                    return (
+                      <TableCell
+                        key={run.record.run_id}
+                        className={cn(isBaseline && 'bg-primary/5')}
+                      >
+                        <ValueCell
+                          value={run.derived_metrics?.[key]}
+                          baselineValue={baselineRun?.derived_metrics?.[key]}
                           showDelta={showDelta}
                         />
                       </TableCell>

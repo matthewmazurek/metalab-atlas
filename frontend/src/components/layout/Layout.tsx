@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { BarChart3, Beaker, GitCompare, LayoutList, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
+import { ConnectionErrorModal } from './ConnectionErrorModal';
 
 const navItems = [
   { path: '/experiments', label: 'Experiments', icon: Beaker },
@@ -25,13 +26,13 @@ export function Layout() {
   }, [darkMode]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b bg-card">
+    <div className="h-screen flex flex-col bg-background text-foreground">
+      {/* Header - fixed at top */}
+      <header className="shrink-0 border-b bg-card">
         <div className="flex h-14 items-center px-4 gap-4">
           <Link to="/" className="flex items-center gap-2 font-semibold">
             <BarChart3 className="h-5 w-5" />
-            <span>Metalab Atlas</span>
+            <span>MetaLab Atlas</span>
           </Link>
 
           <nav className="flex items-center gap-1 ml-6">
@@ -65,10 +66,15 @@ export function Layout() {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="container mx-auto py-6 px-4">
-        <Outlet />
+      {/* Main content - scrollable */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="container mx-auto py-6 px-4">
+          <Outlet />
+        </div>
       </main>
+
+      {/* Global connection error modal */}
+      <ConnectionErrorModal />
     </div>
   );
 }

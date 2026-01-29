@@ -102,6 +102,7 @@ export interface RunResponse {
   record: RecordFields;
   params: Record<string, unknown>;
   metrics: Record<string, unknown>;
+  derived_metrics: Record<string, unknown>;
   artifacts: ArtifactInfo[];
 }
 
@@ -167,6 +168,7 @@ export interface FieldIndex {
   run_count: number;
   params_fields: Record<string, FieldInfo>;
   metrics_fields: Record<string, FieldInfo>;
+  derived_fields: Record<string, FieldInfo>;
   record_fields: Record<string, FieldInfo>;
 }
 
@@ -209,7 +211,7 @@ export interface ManifestResponse {
   params: Record<string, unknown>;
   seeds: Record<string, unknown>;
   context_fingerprint?: string | null;
-  runtime_hints?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
   total_runs: number;
   run_ids?: string[] | null;
   submitted_at?: string | null;

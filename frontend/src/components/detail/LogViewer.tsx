@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useLog, useLogsList } from '@/api/hooks';
-import { Search, FileText, RefreshCw } from 'lucide-react';
+import { Search, FileText, RefreshCw, ScrollText } from 'lucide-react';
 
 interface LogViewerProps {
   runId: string;
@@ -57,7 +57,10 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Logs</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <ScrollText className="h-4 w-4" />
+            Logs
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -74,7 +77,10 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Logs</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <ScrollText className="h-4 w-4" />
+            Logs
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="p-4 text-muted-foreground">Loading logs...</div>
@@ -85,11 +91,13 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
 
   // Default to first available log
   const defaultLog = logs[0];
+  const showTabs = logs.length > 1;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
+          <ScrollText className="h-4 w-4" />
           Logs
           {isRunning && (
             <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
@@ -100,20 +108,24 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue={defaultLog}>
-          <TabsList>
+        {showTabs ? (
+          <Tabs defaultValue={defaultLog}>
+            <TabsList>
+              {logs.map((logName) => (
+                <TabsTrigger key={logName} value={logName}>
+                  {logName}
+                </TabsTrigger>
+              ))}
+            </TabsList>
             {logs.map((logName) => (
-              <TabsTrigger key={logName} value={logName}>
-                {logName}
-              </TabsTrigger>
+              <TabsContent key={logName} value={logName}>
+                <LogContent runId={runId} logName={logName} isRunning={isRunning} />
+              </TabsContent>
             ))}
-          </TabsList>
-          {logs.map((logName) => (
-            <TabsContent key={logName} value={logName}>
-              <LogContent runId={runId} logName={logName} isRunning={isRunning} />
-            </TabsContent>
-          ))}
-        </Tabs>
+          </Tabs>
+        ) : (
+          <LogContent runId={runId} logName={defaultLog} isRunning={isRunning} />
+        )}
       </CardContent>
     </Card>
   );

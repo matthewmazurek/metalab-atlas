@@ -1,4 +1,4 @@
-"""API routers for Metalab Atlas."""
+"""API routers for MetaLab Atlas."""
 
 from atlas.routers.aggregate import router as aggregate_router
 from atlas.routers.artifacts import router as artifacts_router

@@ -1,4 +1,4 @@
-# Metalab Atlas
+# MetaLab Atlas
 
 Dashboard for exploring and visualizing [metalab](../metalab) experiment runs.
 

@@ -1,11 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { LucideIcon } from 'lucide-react';
 
 interface MetricsGridProps {
   title: string;
   data: Record<string, unknown>;
+  icon?: LucideIcon;
 }
 
-export function MetricsGrid({ title, data }: MetricsGridProps) {
+export function MetricsGrid({ title, data, icon: Icon }: MetricsGridProps) {
   const entries = Object.entries(data);
 
   if (entries.length === 0) {
@@ -25,7 +27,10 @@ export function MetricsGrid({ title, data }: MetricsGridProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          {Icon && <Icon className="h-4 w-4" />}
+          {title}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

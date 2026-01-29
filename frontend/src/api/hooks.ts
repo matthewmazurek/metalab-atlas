@@ -1,5 +1,5 @@
 /**
- * React Query hooks for Metalab Atlas API.
+ * React Query hooks for MetaLab Atlas API.
  */
 
 import { useQuery } from '@tanstack/react-query';

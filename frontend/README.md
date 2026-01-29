@@ -1,6 +1,6 @@
 # Atlas Frontend
 
-React frontend for Metalab Atlas dashboard.
+React frontend for MetaLab Atlas dashboard.
 
 ## Setup
 

@@ -29,6 +29,7 @@ export function FieldSelector({
 }: FieldSelectorProps) {
   const paramsFields = fieldIndex?.params_fields || {};
   const metricsFields = fieldIndex?.metrics_fields || {};
+  const derivedFields = fieldIndex?.derived_fields || {};
 
   const filterFields = (fields: Record<string, { type: string }>) => {
     if (!filterNumeric) return Object.keys(fields);
@@ -37,6 +38,7 @@ export function FieldSelector({
 
   const paramsOptions = filterFields(paramsFields).map((k) => `params.${k}`);
   const metricsOptions = filterFields(metricsFields).map((k) => `metrics.${k}`);
+  const derivedOptions = filterFields(derivedFields).map((k) => `derived.${k}`);
 
   return (
     <div className="space-y-2">
@@ -47,7 +49,7 @@ export function FieldSelector({
         </SelectTrigger>
         <SelectContent>
           {allowEmpty && <SelectItem value="_empty">None</SelectItem>}
-          
+
           {paramsOptions.length > 0 && (
             <>
               <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
@@ -60,13 +62,26 @@ export function FieldSelector({
               ))}
             </>
           )}
-          
+
           {metricsOptions.length > 0 && (
             <>
               <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
                 Metrics (outputs)
               </div>
               {metricsOptions.map((field) => (
+                <SelectItem key={field} value={field}>
+                  {field}
+                </SelectItem>
+              ))}
+            </>
+          )}
+
+          {derivedOptions.length > 0 && (
+            <>
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                Derived (computed)
+              </div>
+              {derivedOptions.map((field) => (
                 <SelectItem key={field} value={field}>
                   {field}
                 </SelectItem>

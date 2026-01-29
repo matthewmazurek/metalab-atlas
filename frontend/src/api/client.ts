@@ -1,5 +1,5 @@
 /**
- * API client for Metalab Atlas backend.
+ * API client for MetaLab Atlas backend.
  */
 
 import axios from 'axios';
@@ -166,8 +166,8 @@ export async function fetchExperimentManifests(
 
 export async function fetchLatestManifest(
   experimentId: string
-): Promise<ManifestResponse> {
-  const response = await api.get<ManifestResponse>(
+): Promise<ManifestResponse | null> {
+  const response = await api.get<ManifestResponse | null>(
     `/api/experiments/${encodeURIComponent(experimentId)}/manifests/latest`
   );
   return response.data;

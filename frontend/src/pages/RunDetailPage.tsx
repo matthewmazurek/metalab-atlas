@@ -1,18 +1,30 @@
-import { useParams, Link } from 'react-router-dom';
-import { useRun } from '@/api/hooks';
+import { useParams } from 'react-router-dom';
+import { useRun, useLatestManifest } from '@/api/hooks';
 import { StatusBadge } from '@/components/runs/StatusBadge';
 import { MetricsGrid } from '@/components/detail/MetricsGrid';
 import { ArtifactList } from '@/components/detail/ArtifactList';
 import { LogViewer } from '@/components/detail/LogViewer';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { PageTitle } from '@/components/ui/typography';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { PageHeader } from '@/components/ui/page-header';
+import {
+  AlertCircle,
+  BarChart3,
+  Calculator,
+  Fingerprint,
+  Layers,
+  Loader2,
+  Settings,
+} from 'lucide-react';
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   // Run query auto-polls every 5s when status is 'running'
   const { data: run, isLoading, isError } = useRun(runId || '');
+
+  // Get manifest to get experiment display name
+  const experimentId = run?.record.experiment_id || '';
+  const { data: manifest } = useLatestManifest(experimentId);
+  const experimentDisplayName = manifest?.name || experimentId;
 
   // Derived state for child components
   const isRunning = run?.record.status === 'running';
@@ -27,15 +39,20 @@ export function RunDetailPage() {
 
   if (isError || !run) {
     return (
-      <div className="space-y-4">
-        <Link to="/runs">
-          <Button variant="ghost">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to runs
-          </Button>
-        </Link>
-        <div className="text-center p-8 text-destructive">
-          Run not found: {runId}
+      <div className="space-y-6">
+        <PageHeader
+          title={runId || 'Unknown'}
+          breadcrumb={[
+            { label: 'Experiments', href: '/experiments' },
+            { label: 'Runs', href: '/runs' },
+            { label: runId || 'Unknown' },
+          ]}
+          backTo="/runs"
+        />
+        <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
+          <AlertCircle className="h-8 w-8 mb-2" />
+          <p className="font-medium">Run not found</p>
+          <p className="text-sm font-mono">{runId}</p>
         </div>
       </div>
     );
@@ -48,27 +65,37 @@ export function RunDetailPage() {
     return `${(ms / 60000).toFixed(1)}m`;
   };
 
+  // Build breadcrumb items
+  const breadcrumbItems = [
+    { label: 'Experiments', href: '/experiments' },
+    {
+      label: experimentDisplayName,
+      href: `/experiments/${encodeURIComponent(experimentId)}`,
+    },
+    {
+      label: 'Runs',
+      href: `/runs?experiment_id=${encodeURIComponent(experimentId)}`,
+    },
+    { label: run.record.run_id.slice(0, 8) + '...' },
+  ];
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link to="/runs">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-        </Link>
-        <div className="flex-1">
-          <PageTitle className="font-mono">{run.record.run_id}</PageTitle>
-          <div className="text-muted-foreground">{run.record.experiment_id}</div>
-        </div>
-        <StatusBadge status={run.record.status} />
-      </div>
+      <PageHeader
+        title={<span className="font-mono">{run.record.run_id}</span>}
+        subtitle={run.record.experiment_id}
+        breadcrumb={breadcrumbItems}
+        backTo={`/runs?experiment_id=${encodeURIComponent(experimentId)}`}
+        actions={<StatusBadge status={run.record.status} />}
+      />
 
       {/* Overview card */}
       <Card>
         <CardHeader>
-          <CardTitle>Overview</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Layers className="h-4 w-4" />
+            Overview
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -92,36 +119,24 @@ export function RunDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Error card (if failed) */}
-      {run.record.error && (
-        <Card className="border-destructive">
-          <CardHeader>
-            <CardTitle className="text-destructive">Error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="font-semibold">{run.record.error.type}</div>
-              <div>{run.record.error.message}</div>
-              {run.record.error.traceback && (
-                <pre className="p-4 bg-muted rounded text-sm overflow-auto">
-                  {run.record.error.traceback}
-                </pre>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Params */}
-      <MetricsGrid title="Parameters (Inputs)" data={run.params} />
+      <MetricsGrid title="Parameters (Inputs)" data={run.params} icon={Settings} />
 
       {/* Metrics */}
-      <MetricsGrid title="Metrics (Outputs)" data={run.metrics} />
+      <MetricsGrid title="Metrics (Outputs)" data={run.metrics} icon={BarChart3} />
 
-      {/* Provenance */}
+      {/* Derived Metrics (only show if there are any) */}
+      {run.derived_metrics && Object.keys(run.derived_metrics).length > 0 && (
+        <MetricsGrid title="Derived Metrics" data={run.derived_metrics} icon={Calculator} />
+      )}
+
+      {/* Fingerprints */}
       <Card>
         <CardHeader>
-          <CardTitle>Provenance</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Fingerprint className="h-4 w-4" />
+            Fingerprints
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -155,6 +170,29 @@ export function RunDetailPage() {
 
       {/* Artifacts */}
       <ArtifactList runId={run.record.run_id} artifacts={run.artifacts} />
+
+      {/* Error card (if failed) */}
+      {run.record.error && (
+        <Card className="border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              Error
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="font-semibold">{run.record.error.type}</div>
+              <div>{run.record.error.message}</div>
+              {run.record.error.traceback && (
+                <pre className="p-4 bg-muted rounded text-sm overflow-auto">
+                  {run.record.error.traceback}
+                </pre>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Logs - polls every 5s when run is active */}
       <LogViewer runId={run.record.run_id} isRunning={isRunning} />

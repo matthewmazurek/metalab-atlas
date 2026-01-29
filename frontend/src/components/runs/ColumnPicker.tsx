@@ -20,10 +20,13 @@ export function ColumnPicker() {
 
   // Get available fields from the field index
   const availableFields = useMemo(() => {
-    if (!fieldsData) return { params: [], metrics: [] };
+    if (!fieldsData) return { params: [], metrics: [], derived: [], metadata: [] };
     return {
       params: Object.keys(fieldsData.params_fields || {}),
       metrics: Object.keys(fieldsData.metrics_fields || {}),
+      derived: Object.keys(fieldsData.derived_fields || {}),
+      // Metadata fields are always available (from record)
+      metadata: [{ id: 'record.seed_fingerprint', label: 'Seed Fingerprint' }],
     };
   }, [fieldsData]);
 
@@ -51,6 +54,7 @@ export function ColumnPicker() {
     setVisibleColumns(experimentId, [
       ...availableFields.params,
       ...availableFields.metrics,
+      ...availableFields.derived,
     ]);
   };
 
@@ -58,7 +62,11 @@ export function ColumnPicker() {
     setVisibleColumns(experimentId, []);
   };
 
-  const hasFields = availableFields.params.length > 0 || availableFields.metrics.length > 0;
+  const hasFields =
+    availableFields.params.length > 0 ||
+    availableFields.metrics.length > 0 ||
+    availableFields.derived.length > 0 ||
+    availableFields.metadata.length > 0;
 
   // Don't show if no experiment selected (no dynamic columns)
   if (!filter.experiment_id) {
@@ -154,6 +162,64 @@ export function ColumnPicker() {
                       />
                       <span className="truncate" title={field}>
                         {field}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(availableFields.params.length > 0 || availableFields.metrics.length > 0) &&
+              availableFields.derived.length > 0 && <Separator className="my-2" />}
+
+            {/* Derived Metrics section */}
+            {availableFields.derived.length > 0 && (
+              <div className="px-2 py-1">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Derived Metrics
+                </div>
+                <div className="space-y-1">
+                  {availableFields.derived.map((field) => (
+                    <label
+                      key={field}
+                      className="flex items-center gap-2 px-1 py-1 hover:bg-accent rounded cursor-pointer text-sm"
+                    >
+                      <Checkbox
+                        checked={currentVisible.includes(field)}
+                        onCheckedChange={() => toggleColumn(field)}
+                      />
+                      <span className="truncate" title={field}>
+                        {field}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(availableFields.params.length > 0 ||
+              availableFields.metrics.length > 0 ||
+              availableFields.derived.length > 0) &&
+              availableFields.metadata.length > 0 && <Separator className="my-2" />}
+
+            {/* Metadata section */}
+            {availableFields.metadata.length > 0 && (
+              <div className="px-2 py-1">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Metadata
+                </div>
+                <div className="space-y-1">
+                  {availableFields.metadata.map((field) => (
+                    <label
+                      key={field.id}
+                      className="flex items-center gap-2 px-1 py-1 hover:bg-accent rounded cursor-pointer text-sm"
+                    >
+                      <Checkbox
+                        checked={currentVisible.includes(field.id)}
+                        onCheckedChange={() => toggleColumn(field.id)}
+                      />
+                      <span className="truncate" title={field.id}>
+                        {field.label}
                       </span>
                     </label>
                   ))}

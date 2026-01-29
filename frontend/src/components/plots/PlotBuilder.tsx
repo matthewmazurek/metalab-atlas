@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useFields, useAggregate, useHistogram } from '@/api/hooks';
 import { useAtlasStore } from '@/store/useAtlasStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,8 +14,8 @@ import {
 } from '@/components/ui/select';
 import { FieldSelector } from './FieldSelector';
 import { Chart } from './Chart';
-import type { AggFn, ChartType, ErrorBarType } from '@/api/types';
-import { Loader2 } from 'lucide-react';
+import type { AggFn, ChartType, ErrorBarType, FilterSpec } from '@/api/types';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 const CHART_TYPE_OPTIONS: { value: ChartType; label: string }[] = [
   { value: 'scatter', label: 'Scatter' },
@@ -42,9 +42,33 @@ const ERROR_OPTIONS: { value: ErrorBarType; label: string }[] = [
   { value: 'ci95', label: '95% CI' },
 ];
 
-export function PlotBuilder() {
+interface PlotBuilderProps {
+  /** Optional list of run IDs to filter the plot data to */
+  runIds?: string[];
+}
+
+export function PlotBuilder({ runIds }: PlotBuilderProps) {
   const { filter, plotConfig, setPlotConfig, updatePlotConfig } = useAtlasStore();
   const { data: fieldIndex, isLoading: fieldsLoading } = useFields(filter.experiment_id || undefined);
+
+  // Build filter with optional run ID filtering
+  const effectiveFilter: FilterSpec = useMemo(() => {
+    if (!runIds || runIds.length === 0) {
+      return filter;
+    }
+    // Add a field filter to restrict to the selected run IDs
+    return {
+      ...filter,
+      field_filters: [
+        ...(filter.field_filters || []),
+        {
+          field: 'record.run_id',
+          op: 'in',
+          value: runIds,
+        },
+      ],
+    };
+  }, [filter, runIds]);
 
   const isHistogram = plotConfig?.chart_type === 'histogram';
 
@@ -67,7 +91,7 @@ export function PlotBuilder() {
   // Aggregate request for non-histogram charts
   const aggregateRequest = plotConfig && !isHistogram
     ? {
-      filter: filter,
+      filter: effectiveFilter,
       x_field: plotConfig.x_field,
       y_field: plotConfig.y_field,
       group_by: plotConfig.group_by.length > 0 ? plotConfig.group_by : undefined,
@@ -80,7 +104,7 @@ export function PlotBuilder() {
   // Histogram request
   const histogramRequest = plotConfig && isHistogram
     ? {
-      filter: filter,
+      filter: effectiveFilter,
       field: plotConfig.y_field,
       bin_count: plotConfig.bin_count,
     }
@@ -265,8 +289,9 @@ export function PlotBuilder() {
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : isError ? (
-            <div className="flex items-center justify-center h-96 text-destructive">
-              Failed to load data
+            <div className="flex flex-col items-center justify-center h-96 text-muted-foreground">
+              <AlertCircle className="h-8 w-8 mb-2" />
+              <p>Failed to load plot data</p>
             </div>
           ) : (aggregateData || histogramData) ? (
             <Chart

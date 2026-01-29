@@ -130,7 +130,10 @@ export function ArtifactList({ runId, artifacts }: ArtifactListProps) {
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Artifacts</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-4 w-4" />
+            Artifacts
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">

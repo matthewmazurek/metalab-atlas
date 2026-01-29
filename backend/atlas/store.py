@@ -188,10 +188,14 @@ class FileStoreAdapter:
             notes=record.notes,
         )
 
+        # Load derived metrics if they exist
+        derived_metrics = self._store.get_derived(record.run_id) or {}
+
         return RunResponse(
             record=record_fields,
             params=record.params_resolved or {},
             metrics=record.metrics or {},
+            derived_metrics=derived_metrics,
             artifacts=artifacts,
         )
 
@@ -208,6 +212,10 @@ class FileStoreAdapter:
         if field_path == "params":
             return " ".join(f"{k}:{v}" for k, v in run.params.items())
 
+        # Handle special case: searching across all derived metrics
+        if field_path == "derived":
+            return " ".join(f"{k}:{v}" for k, v in run.derived_metrics.items())
+
         if len(parts) != 2:
             return None
 
@@ -219,6 +227,8 @@ class FileStoreAdapter:
             return run.params.get(key)
         elif namespace == "metrics":
             return run.metrics.get(key)
+        elif namespace == "derived":
+            return run.derived_metrics.get(key)
 
         return None
 
@@ -289,9 +299,10 @@ class FileStoreAdapter:
                 elif ff.op == FilterOp.CONTAINS:
                     match = str(ff.value).lower() in str(value).lower()
                 elif ff.op == FilterOp.IN:
-                    # Convert value to string for comparison since field index
-                    # stores values as strings (e.g., bool True -> "True")
-                    match = str(value) in ff.value
+                    # Get comparable value: use .value for enums, str() for others
+                    # Field index stores values as strings (e.g., bool True -> "True")
+                    cmp_value = value.value if hasattr(value, 'value') else str(value)
+                    match = cmp_value in ff.value
             except (TypeError, ValueError):
                 continue
 
@@ -346,7 +357,7 @@ class FileStoreAdapter:
         return self._convert_record(record)
 
     # Record fields to index (discrete categorical fields)
-    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id"]
+    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id", "seed_fingerprint"]
 
     def get_field_index(self, filter: FilterSpec | None = None) -> FieldIndex:
         """Build field index from runs."""
@@ -358,6 +369,7 @@ class FileStoreAdapter:
 
         params_fields: dict[str, dict] = {}
         metrics_fields: dict[str, dict] = {}
+        derived_fields: dict[str, dict] = {}
         record_fields: dict[str, dict] = {}
 
         for run in runs:
@@ -385,6 +397,18 @@ class FileStoreAdapter:
                     }
                 self._update_field_stats(metrics_fields[key], value)
 
+            # Index derived metrics
+            for key, value in run.derived_metrics.items():
+                if key not in derived_fields:
+                    derived_fields[key] = {
+                        "type": self._infer_type(value),
+                        "count": 0,
+                        "values": set(),
+                        "min": None,
+                        "max": None,
+                    }
+                self._update_field_stats(derived_fields[key], value)
+
             # Index record fields (status, experiment_id, etc.)
             for key in self.RECORD_FIELDS_TO_INDEX:
                 value = getattr(run.record, key, None)
@@ -409,6 +433,9 @@ class FileStoreAdapter:
             params_fields={k: self._to_field_info(v) for k, v in params_fields.items()},
             metrics_fields={
                 k: self._to_field_info(v) for k, v in metrics_fields.items()
+            },
+            derived_fields={
+                k: self._to_field_info(v) for k, v in derived_fields.items()
             },
             record_fields={k: self._to_field_info(v) for k, v in record_fields.items()},
         )
@@ -677,9 +704,7 @@ class FileStoreAdapter:
             # Parse submitted_at
             submitted_at_str = data.get("submitted_at")
             submitted_at = (
-                datetime.fromisoformat(submitted_at_str)
-                if submitted_at_str
-                else None
+                datetime.fromisoformat(submitted_at_str) if submitted_at_str else None
             )
 
             return ManifestResponse(
@@ -692,7 +717,9 @@ class FileStoreAdapter:
                 params=data.get("params", {}),
                 seeds=data.get("seeds", {}),
                 context_fingerprint=data.get("context_fingerprint"),
-                runtime_hints=data.get("runtime_hints"),
+                metadata=data.get(
+                    "metadata", data.get("runtime_hints")
+                ),  # BC: accept old name
                 total_runs=data.get("total_runs", 0),
                 run_ids=data.get("run_ids"),
                 submitted_at=submitted_at,
@@ -865,6 +892,7 @@ class MultiStoreAdapter:
         # Merge field indices from all stores
         all_params: dict[str, dict] = {}
         all_metrics: dict[str, dict] = {}
+        all_derived: dict[str, dict] = {}
         all_records: dict[str, dict] = {}
         total_runs = 0
 
@@ -897,6 +925,7 @@ class MultiStoreAdapter:
             # Merge all field types
             merge_fields(all_params, idx.params_fields)
             merge_fields(all_metrics, idx.metrics_fields)
+            merge_fields(all_derived, idx.derived_fields)
             merge_fields(all_records, idx.record_fields)
 
         def to_field_info(stats: dict) -> FieldInfo:
@@ -917,6 +946,7 @@ class MultiStoreAdapter:
             run_count=total_runs,
             params_fields={k: to_field_info(v) for k, v in all_params.items()},
             metrics_fields={k: to_field_info(v) for k, v in all_metrics.items()},
+            derived_fields={k: to_field_info(v) for k, v in all_derived.items()},
             record_fields={k: to_field_info(v) for k, v in all_records.items()},
         )
 

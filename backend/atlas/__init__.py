@@ -1,3 +1,3 @@
-"""Metalab Atlas: Dashboard backend."""
+"""MetaLab Atlas: Dashboard backend."""
 
 __version__ = "0.1.0"

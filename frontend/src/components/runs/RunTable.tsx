@@ -69,7 +69,12 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function RunTable() {
+interface RunTableProps {
+  onVisibleRunIdsChange?: (runIds: string[]) => void;
+  onTotalChange?: (total: number) => void;
+}
+
+export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps) {
   const [page, setPage] = useState(0);
   const {
     filter,
@@ -132,7 +137,7 @@ export function RunTable() {
     };
   }, [filter, fieldFilters]);
 
-  const { data, isLoading, isError } = useRuns({
+  const { data, isLoading } = useRuns({
     filter: mergedFilter,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
@@ -149,6 +154,21 @@ export function RunTable() {
   const runs = data?.runs || [];
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  // Notify parent of visible run IDs for "Select All" functionality
+  useEffect(() => {
+    if (onVisibleRunIdsChange) {
+      const visibleIds = runs.map((run) => run.record.run_id);
+      onVisibleRunIdsChange(visibleIds);
+    }
+  }, [runs, onVisibleRunIdsChange]);
+
+  // Notify parent of total count
+  useEffect(() => {
+    if (onTotalChange) {
+      onTotalChange(total);
+    }
+  }, [total, onTotalChange]);
 
   // Build column definitions dynamically
   const columns: ColumnDef[] = useMemo(() => {
@@ -270,6 +290,46 @@ export function RunTable() {
       }
     }
 
+    // Add derived metrics columns
+    if (fieldsData?.derived_fields) {
+      for (const fieldName of visibleColumns) {
+        if (fieldsData.derived_fields[fieldName]) {
+          dynamicColumns.push({
+            id: `derived.${fieldName}`,
+            title: fieldName,
+            field: `derived_metrics.${fieldName}`,
+            sortable: true,
+            filterable: true,
+            render: (run) => (
+              <span className="text-sm font-mono">
+                {formatValue(run.derived_metrics[fieldName])}
+              </span>
+            ),
+            getValue: (run) => String(run.derived_metrics[fieldName] ?? ''),
+          });
+        }
+      }
+    }
+
+    // Add metadata columns (from record fields)
+    for (const fieldPath of visibleColumns) {
+      if (fieldPath === 'record.seed_fingerprint') {
+        dynamicColumns.push({
+          id: 'record.seed_fingerprint',
+          title: 'Seed',
+          field: 'record.seed_fingerprint',
+          sortable: true,
+          filterable: true,
+          render: (run) => (
+            <span className="font-mono text-sm text-muted-foreground" title={run.record.seed_fingerprint}>
+              {run.record.seed_fingerprint.slice(0, 8)}...
+            </span>
+          ),
+          getValue: (run) => run.record.seed_fingerprint,
+        });
+      }
+    }
+
     return [...fixedColumns, ...dynamicColumns];
   }, [filter.experiment_id, fieldsData, visibleColumns]);
 
@@ -347,13 +407,6 @@ export function RunTable() {
     );
   }
 
-  if (isError) {
-    return (
-      <div className="text-center p-8 text-destructive">
-        Failed to load runs. Make sure the Atlas server is running.
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-2">

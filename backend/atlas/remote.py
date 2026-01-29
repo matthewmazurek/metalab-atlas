@@ -654,9 +654,10 @@ class RemoteStoreAdapter:
                         elif ff.op == FilterOp.CONTAINS:
                             match = str(ff.value).lower() in str(value).lower()
                         elif ff.op == FilterOp.IN:
-                            # Convert value to string for comparison since field index
-                            # stores values as strings (e.g., bool True -> "True")
-                            match = str(value) in ff.value
+                            # Get comparable value: use .value for enums, str() for others
+                            # Field index stores values as strings (e.g., bool True -> "True")
+                            cmp_value = value.value if hasattr(value, 'value') else str(value)
+                            match = cmp_value in ff.value
                     except (TypeError, ValueError):
                         continue
 
@@ -716,7 +717,7 @@ class RemoteStoreAdapter:
             return None
 
     # Record fields to index (discrete categorical fields)
-    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id"]
+    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id", "seed_fingerprint"]
 
     def get_field_index(self, filter: FilterSpec | None = None) -> FieldIndex:
         """Build field index from runs."""

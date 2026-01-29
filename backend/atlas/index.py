@@ -114,7 +114,7 @@ class FieldIndexer:
         self._index_path.write_text(json.dumps(data, indent=2))
 
     # Record fields to index (discrete categorical fields)
-    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id"]
+    RECORD_FIELDS_TO_INDEX = ["status", "experiment_id", "seed_fingerprint"]
 
     def _rebuild_index(self) -> FieldIndex:
         """Rebuild the index by scanning all runs."""

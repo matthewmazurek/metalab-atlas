@@ -1,5 +1,5 @@
 """
-CLI entry point for Metalab Atlas.
+CLI entry point for MetaLab Atlas.
 
 Usage:
     metalab-atlas serve --store ./runs --port 8000
@@ -16,7 +16,7 @@ import click
 
 @click.group()
 def main():
-    """Metalab Atlas - Dashboard for exploring experiment runs."""
+    """MetaLab Atlas - Dashboard for exploring experiment runs."""
     pass
 
 
@@ -95,7 +95,7 @@ def serve(
     static_dir = Path(__file__).parent / "static"
     has_frontend = (static_dir / "index.html").exists()
 
-    click.echo("Starting Metalab Atlas...")
+    click.echo("Starting MetaLab Atlas...")
 
     if remote:
         # Remote store mode

@@ -1,5 +1,5 @@
 """
-Dependency injection for Metalab Atlas.
+Dependency injection for MetaLab Atlas.
 
 Provides store adapter instances based on configuration.
 Supports both local and remote (SSH) stores.

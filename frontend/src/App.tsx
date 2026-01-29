@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/components/layout/Layout';
-import { ExperimentsPage } from '@/pages/ExperimentsPage';
+import { ExperimentsListPage } from '@/pages/ExperimentsListPage';
+import { ExperimentDetailPage } from '@/pages/ExperimentDetailPage';
 import { RunsPage } from '@/pages/RunsPage';
 import { RunDetailPage } from '@/pages/RunDetailPage';
 import { PlotsPage } from '@/pages/PlotsPage';
@@ -32,7 +33,8 @@ function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<Navigate to="/experiments" replace />} />
-            <Route path="/experiments" element={<ExperimentsPage />} />
+            <Route path="/experiments" element={<ExperimentsListPage />} />
+            <Route path="/experiments/:experimentId" element={<ExperimentDetailPage />} />
             <Route path="/runs" element={<RunsPage />} />
             <Route path="/runs/:runId" element={<RunDetailPage />} />
             <Route path="/plots" element={<PlotsPage />} />

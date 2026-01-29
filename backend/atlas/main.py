@@ -1,5 +1,5 @@
 """
-FastAPI application for Metalab Atlas.
+FastAPI application for MetaLab Atlas.
 
 Run with:
     uvicorn atlas.main:app --reload
@@ -8,10 +8,12 @@ Or using the CLI:
     metalab-atlas serve --store ./runs
 """
 
+import json
 import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import Response
 
 # Configure logging to show INFO level for atlas modules
 logging.basicConfig(
@@ -37,7 +39,7 @@ from fastapi.staticfiles import StaticFiles
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(
-    title="Metalab Atlas",
+    title="MetaLab Atlas",
     description="Dashboard API for exploring metalab experiment runs",
     version="0.1.0",
 )
@@ -56,6 +58,94 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class PrettyJSONMiddleware:
+    """Pure ASGI middleware to pretty-print JSON responses when ?pretty=true is passed."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Check for ?pretty=true in query string
+        query_string = scope.get("query_string", b"").decode()
+        if "pretty=true" not in query_string:
+            await self.app(scope, receive, send)
+            return
+
+        # Intercept response to pretty-print JSON
+        response_started = False
+        response_headers = []
+        response_status = 200
+        body_parts = []
+        content_type = ""
+
+        async def send_wrapper(message):
+            nonlocal response_started, response_headers, response_status, content_type
+
+            if message["type"] == "http.response.start":
+                response_started = True
+                response_status = message["status"]
+                response_headers = list(message.get("headers", []))
+                # Extract content-type
+                for name, value in response_headers:
+                    if name.lower() == b"content-type":
+                        content_type = value.decode()
+                        break
+                # Don't send yet - wait to see if we need to modify
+                return
+
+            elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                more_body = message.get("more_body", False)
+                body_parts.append(body)
+
+                if not more_body:
+                    # Complete response - check if JSON and pretty-print
+                    full_body = b"".join(body_parts)
+
+                    if "application/json" in content_type:
+                        try:
+                            data = json.loads(full_body)
+                            full_body = json.dumps(
+                                data, indent=2, ensure_ascii=False
+                            ).encode()
+                            # Update content-length header
+                            response_headers = [
+                                (name, value)
+                                for name, value in response_headers
+                                if name.lower() != b"content-length"
+                            ]
+                            response_headers.append(
+                                (b"content-length", str(len(full_body)).encode())
+                            )
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            pass  # Keep original body
+
+                    # Now send the response
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": response_status,
+                            "headers": response_headers,
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": full_body,
+                            "more_body": False,
+                        }
+                    )
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app.add_middleware(PrettyJSONMiddleware)
+
 # Include API routers
 app.include_router(runs_router)
 app.include_router(artifacts_router)
@@ -71,10 +161,11 @@ async def health():
     from atlas.deps import get_store_path
 
     store_path = get_store_path()
+    path_obj = Path(store_path)
     return {
         "status": "healthy",
-        "store_path": str(store_path),
-        "store_exists": store_path.exists(),
+        "store_path": store_path,
+        "store_exists": path_obj.exists(),
     }
 
 
@@ -102,9 +193,9 @@ else:
         return HTMLResponse(
             content="""
             <html>
-            <head><title>Metalab Atlas</title></head>
+            <head><title>MetaLab Atlas</title></head>
             <body style="font-family: system-ui; padding: 2rem;">
-                <h1>Metalab Atlas API</h1>
+                <h1>MetaLab Atlas API</h1>
                 <p>The API is running. No bundled frontend found.</p>
                 <p>For development, run the frontend separately:</p>
                 <pre>cd frontend && npm run dev</pre>
