@@ -288,7 +288,12 @@ export function ExperimentDetailPage() {
               {/* Successful */}
               <div>
                 <div className="text-muted-foreground text-xs mb-1">Success</div>
-                <div className="text-sm font-medium text-green-600 dark:text-green-400">{successCount}</div>
+                <div className={cn(
+                  "text-sm font-medium text-green-600 dark:text-green-400",
+                  successCount > 0 ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
+                )}>
+                  {successCount}
+                </div>
               </div>
 
               {/* Failed */}
