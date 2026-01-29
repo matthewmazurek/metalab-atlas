@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
-import sys
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -45,11 +44,6 @@ from atlas.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Add metalab to path if needed
-METALAB_PATH = Path(__file__).parent.parent.parent.parent / "metalab"
-if str(METALAB_PATH.parent) not in sys.path:
-    sys.path.insert(0, str(METALAB_PATH.parent))
 
 
 class StoreAdapter(Protocol):
