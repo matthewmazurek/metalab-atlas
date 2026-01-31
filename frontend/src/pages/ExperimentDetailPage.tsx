@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import { useExperiments, useLatestManifest, useExperimentManifests, useRuns } from '@/api/hooks';
+import { useExperiments, useLatestManifest, useExperimentManifests, useStatusCounts } from '@/api/hooks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
@@ -115,31 +115,6 @@ function formatTimestamp(dateStr: string | null | undefined): string {
   }
 }
 
-/**
- * Hook to get status counts for an experiment.
- */
-function useStatusCounts(experimentId: string) {
-  const { data: successData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['success'] },
-    limit: 1,
-  });
-
-  const { data: failedData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['failed'] },
-    limit: 1,
-  });
-
-  const { data: runningData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['running'] },
-    limit: 1,
-  });
-
-  return {
-    successCount: successData?.total ?? 0,
-    failedCount: failedData?.total ?? 0,
-    runningCount: runningData?.total ?? 0,
-  };
-}
 
 export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
@@ -163,8 +138,11 @@ export function ExperimentDetailPage() {
     (e) => e.experiment_id === decodedExperimentId
   );
 
-  // Get status counts
-  const { successCount, failedCount, runningCount } = useStatusCounts(decodedExperimentId);
+  // Get status counts (single efficient API call)
+  const { data: statusCounts } = useStatusCounts(decodedExperimentId);
+  const successCount = statusCounts?.success ?? 0;
+  const failedCount = statusCounts?.failed ?? 0;
+  const runningCount = statusCounts?.running ?? 0;
 
   // Total expected from manifest
   const expectedTotal = manifest?.total_runs;

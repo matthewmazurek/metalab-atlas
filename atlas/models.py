@@ -328,6 +328,9 @@ class HistogramResponse(BaseModel):
     bins: list[float] = Field(..., description="Bin edges (n+1 values)")
     counts: list[int] = Field(..., description="Counts per bin (n values)")
     total: int = Field(..., description="Total number of values")
+    run_ids_per_bin: list[list[str]] | None = Field(
+        default=None, description="Run IDs falling into each bin (for click-through)"
+    )
 
 
 # =============================================================================
@@ -426,3 +429,64 @@ class ManifestResponse(BaseModel):
     total_runs: int = 0
     run_ids: list[str] | None = None
     submitted_at: datetime | None = None
+
+
+# =============================================================================
+# SLURM Status Models
+# =============================================================================
+
+
+class SlurmArrayStatusResponse(BaseModel):
+    """
+    SLURM array job status response.
+
+    Provides explicit state buckets for comprehensive job tracking,
+    combining squeue (active jobs) and sacct (terminal jobs) data.
+    """
+
+    job_ids: list[str] = Field(
+        ..., description="SLURM job IDs for the array (one per shard)"
+    )
+    total: int = Field(..., description="Total number of tasks")
+
+    # Explicit state buckets
+    running: int = Field(default=0, description="Tasks currently executing (RUNNING)")
+    pending: int = Field(default=0, description="Tasks waiting to start (PENDING)")
+    completed: int = Field(
+        default=0, description="Successfully finished tasks (COMPLETED)"
+    )
+    failed: int = Field(default=0, description="Tasks that failed (FAILED)")
+    cancelled: int = Field(default=0, description="Cancelled tasks (CANCELLED)")
+    timeout: int = Field(default=0, description="Tasks that timed out (TIMEOUT)")
+    oom: int = Field(
+        default=0, description="Out of memory tasks (OUT_OF_MEMORY)"
+    )
+    other: int = Field(
+        default=0, description="Other states (HELD, SUSPENDED, REQUEUED, etc.)"
+    )
+
+    # Timestamps
+    last_squeue_at: datetime | None = Field(
+        default=None, description="When squeue was last queried"
+    )
+    last_sacct_at: datetime | None = Field(
+        default=None, description="When sacct was last queried"
+    )
+    sacct_stale: bool = Field(
+        default=False, description="True if sacct cache is > 5 min old"
+    )
+
+
+class StatusCounts(BaseModel):
+    """
+    Lightweight status counts for an experiment.
+
+    Computed by scanning run record status fields without full record
+    conversion, making this efficient for large experiments.
+    """
+
+    success: int = Field(default=0, description="Runs with status=success")
+    failed: int = Field(default=0, description="Runs with status=failed")
+    running: int = Field(default=0, description="Runs with status=running")
+    cancelled: int = Field(default=0, description="Runs with status=cancelled")
+    total: int = Field(default=0, description="Total runs found in store")

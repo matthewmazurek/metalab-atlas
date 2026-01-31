@@ -248,3 +248,12 @@ export interface SlurmArrayStatusResponse {
   last_sacct_at?: string | null;
   sacct_stale: boolean;
 }
+
+// Lightweight status counts
+export interface StatusCounts {
+  success: number;
+  failed: number;
+  running: number;
+  cancelled: number;
+  total: number;
+}

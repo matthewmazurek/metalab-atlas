@@ -18,6 +18,7 @@ import type {
   RunListResponse,
   RunResponse,
   SlurmArrayStatusResponse,
+  StatusCounts,
 } from './types';
 
 // Base URL for API
@@ -223,6 +224,15 @@ export async function fetchSlurmStatus(
 ): Promise<SlurmArrayStatusResponse> {
   const response = await api.get<SlurmArrayStatusResponse>(
     `/api/experiments/${encodeURIComponent(experimentId)}/slurm-status`
+  );
+  return response.data;
+}
+
+export async function fetchStatusCounts(
+  experimentId: string
+): Promise<StatusCounts> {
+  const response = await api.get<StatusCounts>(
+    `/api/experiments/${encodeURIComponent(experimentId)}/status-counts`
   );
   return response.data;
 }

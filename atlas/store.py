@@ -41,6 +41,7 @@ from atlas.models import (
     RunResponse,
     RunStatus,
     Series,
+    StatusCounts,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,15 @@ class StoreAdapter(Protocol):
         self, experiment_id: str, timestamp: str | None = None
     ) -> "ManifestResponse | None":
         """Get experiment manifest content. If timestamp is None, return latest."""
+        ...
+
+    def get_status_counts(self, experiment_id: str | None = None) -> "StatusCounts":
+        """
+        Get lightweight status counts without full record conversion.
+
+        This is optimized for dashboard polling - only reads the status
+        field from each run record JSON file.
+        """
         ...
 
 
@@ -615,6 +625,48 @@ class FileStoreAdapter:
             (exp_id, count, latest) for exp_id, (count, latest) in experiments.items()
         ]
 
+    def get_status_counts(self, experiment_id: str | None = None) -> StatusCounts:
+        """
+        Get lightweight status counts by scanning only the status field.
+
+        This avoids full record conversion, making it efficient for
+        large experiments with frequent polling.
+        """
+        runs_dir = self._store_path / "runs"
+        if not runs_dir.exists():
+            return StatusCounts()
+
+        success = failed = running = cancelled = 0
+
+        for path in runs_dir.glob("*.json"):
+            try:
+                with path.open() as f:
+                    data = json.load(f)
+
+                # Filter by experiment_id if specified
+                if experiment_id and data.get("experiment_id") != experiment_id:
+                    continue
+
+                status = data.get("status")
+                if status == "success":
+                    success += 1
+                elif status == "failed":
+                    failed += 1
+                elif status == "running":
+                    running += 1
+                elif status == "cancelled":
+                    cancelled += 1
+            except (json.JSONDecodeError, OSError):
+                continue
+
+        return StatusCounts(
+            success=success,
+            failed=failed,
+            running=running,
+            cancelled=cancelled,
+            total=success + failed + running + cancelled,
+        )
+
     def list_experiment_manifests(self, experiment_id: str) -> list[ManifestInfo]:
         """List all manifest files for an experiment."""
         experiments_dir = self._store_path / "experiments"
@@ -1000,6 +1052,20 @@ class MultiStoreAdapter:
         return [
             (exp_id, count, latest) for exp_id, (count, latest) in experiments.items()
         ]
+
+    def get_status_counts(self, experiment_id: str | None = None) -> StatusCounts:
+        """Get aggregated status counts across all stores."""
+        total_counts = StatusCounts()
+
+        for adapter in self._adapters:
+            counts = adapter.get_status_counts(experiment_id)
+            total_counts.success += counts.success
+            total_counts.failed += counts.failed
+            total_counts.running += counts.running
+            total_counts.cancelled += counts.cancelled
+            total_counts.total += counts.total
+
+        return total_counts
 
     def list_experiment_manifests(self, experiment_id: str) -> list[ManifestInfo]:
         """List all manifest files for an experiment across all stores."""
