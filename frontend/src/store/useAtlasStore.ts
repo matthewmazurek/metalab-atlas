@@ -191,6 +191,7 @@ export const useAtlasStore = create<AtlasUIState>()(
     {
       name: 'atlas-ui-storage',
       partialize: (state) => ({
+        selectedRunIds: state.selectedRunIds,
         pinnedColumns: state.pinnedColumns,
         darkMode: state.darkMode,
         sidebarCollapsed: state.sidebarCollapsed,

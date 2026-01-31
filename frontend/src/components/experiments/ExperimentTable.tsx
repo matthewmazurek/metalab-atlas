@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import { useExperiments, useRuns, queryKeys } from '@/api/hooks';
@@ -317,55 +317,26 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   const [sortField, setSortField] = useState<SortField>('latest_run');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Initialize filters from URL params synchronously to avoid race conditions
-  const [nameFilter, setNameFilter] = useState(() => searchParams.get('name') || '');
-  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
-    const tagsParam = searchParams.get('tags');
-    return tagsParam ? tagsParam.split(',').filter(Boolean) : [];
-  });
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(() => {
-    const statusParam = searchParams.get('status');
-    return statusParam ? statusParam.split(',').filter(Boolean) : [];
-  });
+  // URL is the source of truth for filters
+  const nameFilter = searchParams.get('name') || '';
+  const selectedTags = useMemo(
+    () => searchParams.get('tags')?.split(',').filter(Boolean) || [],
+    [searchParams]
+  );
+  const selectedStatuses = useMemo(
+    () => searchParams.get('status')?.split(',').filter(Boolean) || [],
+    [searchParams]
+  );
 
-  // Track whether we're updating URL from state (to avoid sync loops)
-  const isUpdatingUrl = useRef(false);
-
-  // Sync state FROM URL when URL changes externally (e.g., clicking tag links)
-  useEffect(() => {
-    // Skip if we're the ones who just updated the URL
-    if (isUpdatingUrl.current) {
-      isUpdatingUrl.current = false;
-      return;
-    }
-
-    const urlTags = searchParams.get('tags')?.split(',').filter(Boolean) || [];
-    const urlStatuses = searchParams.get('status')?.split(',').filter(Boolean) || [];
-    const urlName = searchParams.get('name') || '';
-
-    // Update state to match URL
-    setSelectedTags(urlTags);
-    setSelectedStatuses(urlStatuses);
-    setNameFilter(urlName);
-  }, [searchParams]);
-
-  // Sync filters TO URL when state changes from user interaction
   const syncFiltersToUrl = useCallback((
     tags: string[],
     statuses: string[],
     name: string
   ) => {
     const params = new URLSearchParams();
-    if (tags.length > 0) {
-      params.set('tags', tags.join(','));
-    }
-    if (statuses.length > 0) {
-      params.set('status', statuses.join(','));
-    }
-    if (name) {
-      params.set('name', name);
-    }
-    isUpdatingUrl.current = true;
+    if (tags.length > 0) params.set('tags', tags.join(','));
+    if (statuses.length > 0) params.set('status', statuses.join(','));
+    if (name) params.set('name', name);
     setSearchParams(params, { replace: true });
   }, [setSearchParams]);
 
@@ -519,27 +490,21 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   };
 
   const handleFilter = (value: string) => {
-    setNameFilter(value);
     syncFiltersToUrl(selectedTags, selectedStatuses, value);
     setPage(0);
   };
 
   const handleTagFilter = (tags: string[]) => {
-    setSelectedTags(tags);
     syncFiltersToUrl(tags, selectedStatuses, nameFilter);
     setPage(0);
   };
 
   const handleStatusFilter = (statuses: string[]) => {
-    setSelectedStatuses(statuses);
     syncFiltersToUrl(selectedTags, statuses, nameFilter);
     setPage(0);
   };
 
   const clearAllFilters = () => {
-    setNameFilter('');
-    setSelectedTags([]);
-    setSelectedStatuses([]);
     syncFiltersToUrl([], [], '');
     setPage(0);
   };

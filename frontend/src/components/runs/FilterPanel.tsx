@@ -105,7 +105,7 @@ export function FilterPanel() {
   const totalRuns = experimentsData?.experiments.reduce((sum, e) => sum + e.run_count, 0) ?? 0;
 
   // Get status counts for the selected experiment
-  const { successCount, failedCount, runningCount } = useStatusCounts(filter.experiment_id ?? null);
+  const { successCount, runningCount } = useStatusCounts(filter.experiment_id ?? null);
 
   // Total expected from manifest
   const expectedTotal = manifest?.total_runs;

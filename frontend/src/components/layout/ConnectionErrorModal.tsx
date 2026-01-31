@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { isConnectionError } from '@/components/ui/connection-error';
+import { isConnectionError } from '@/components/ui/connection-error.utils';
 import { RefreshCw, ServerOff } from 'lucide-react';
 import { useState } from 'react';
 

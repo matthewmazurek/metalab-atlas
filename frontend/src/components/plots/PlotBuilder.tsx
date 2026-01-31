@@ -22,7 +22,6 @@ const CHART_TYPE_OPTIONS: { value: ChartType; label: string }[] = [
   { value: 'line', label: 'Line' },
   { value: 'bar', label: 'Bar' },
   { value: 'heatmap', label: 'Heatmap' },
-  { value: 'radar', label: 'Radar' },
   { value: 'candlestick', label: 'Candlestick' },
   { value: 'histogram', label: 'Histogram' },
 ];

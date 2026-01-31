@@ -9,6 +9,18 @@ import { fetchRuns } from '@/api/client';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { GitCompare, X, CheckCircle2, AlertTriangle, CheckSquare, BarChart3, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { FieldFilter, FilterOp } from '@/api/types';
+
+function isFilterOp(op: unknown): op is FilterOp {
+  return op === 'eq' || op === 'ne' || op === 'lt' || op === 'le' || op === 'gt' || op === 'ge'
+    || op === 'contains' || op === 'in';
+}
+
+function isFieldFilter(v: unknown): v is FieldFilter {
+  if (typeof v !== 'object' || v === null) return false;
+  const obj = v as { field?: unknown; op?: unknown; value?: unknown };
+  return typeof obj.field === 'string' && isFilterOp(obj.op) && 'value' in obj;
+}
 
 /**
  * Hook to get status counts for an experiment
@@ -50,7 +62,70 @@ export function RunsPage() {
     getFieldFilters,
   } = useAtlasStore();
   const hasSelection = selectedRunIds.length > 0;
-  const hasActiveFilters = columnFilters.length > 0;
+
+  // URL-based field filters (local state, NOT stored in global filter)
+  // This prevents pollution of the global filter state when navigating from plots
+  const [urlFieldFilters, setUrlFieldFilters] = useState<FieldFilter[]>([]);
+
+  // Parse URL field_filters on mount and when URL changes
+  useEffect(() => {
+    const fieldFiltersParam = searchParams.get('field_filters');
+    if (fieldFiltersParam) {
+      try {
+        const parsedFilters = JSON.parse(fieldFiltersParam);
+        if (Array.isArray(parsedFilters)) {
+          setUrlFieldFilters(parsedFilters.filter(isFieldFilter));
+        }
+      } catch {
+        setUrlFieldFilters([]);
+      }
+    } else {
+      setUrlFieldFilters([]);
+    }
+  }, [searchParams]);
+
+  const hasUrlFilters = urlFieldFilters.length > 0;
+  const hasColumnFilters = columnFilters.length > 0;
+  const hasActiveFilters = hasUrlFilters || hasColumnFilters;
+
+  // Clear a specific URL field filter
+  const clearUrlFilter = useCallback((index: number) => {
+    const newFieldFilters = urlFieldFilters.filter((_, i) => i !== index);
+    setUrlFieldFilters(newFieldFilters);
+    // Update URL
+    const newParams = new URLSearchParams(searchParams);
+    if (newFieldFilters.length > 0) {
+      newParams.set('field_filters', JSON.stringify(newFieldFilters));
+    } else {
+      newParams.delete('field_filters');
+    }
+    // Preserve experiment_id if present
+    const experimentId = searchParams.get('experiment_id');
+    if (experimentId && !newParams.has('experiment_id')) {
+      newParams.set('experiment_id', experimentId);
+    }
+    navigate(`/runs${newParams.toString() ? `?${newParams.toString()}` : ''}`);
+  }, [urlFieldFilters, searchParams, navigate]);
+
+  // Clear all filters (both URL and column)
+  const clearAllFilters = useCallback(() => {
+    setUrlFieldFilters([]);
+    clearAllColumnFilters();
+    // Preserve experiment_id
+    const experimentId = searchParams.get('experiment_id');
+    navigate(experimentId ? `/runs?experiment_id=${encodeURIComponent(experimentId)}` : '/runs');
+  }, [clearAllColumnFilters, searchParams, navigate]);
+
+  // Format a field filter for display
+  const formatUrlFilter = (ff: typeof urlFieldFilters[0]) => {
+    if (ff.field === 'record.run_id' && ff.op === 'in' && Array.isArray(ff.value)) {
+      return `${ff.value.length} runs from plot`;
+    }
+    if (ff.op === 'in' && Array.isArray(ff.value)) {
+      return `${ff.field}: [${ff.value.length}]`;
+    }
+    return `${ff.field} ${ff.op} ${ff.value}`;
+  };
 
   // Track total count of filtered runs
   const [totalFilteredRuns, setTotalFilteredRuns] = useState(0);
@@ -70,11 +145,13 @@ export function RunsPage() {
     setIsSelectingAll(true);
     try {
       // Build the merged filter (same as RunTable uses internally)
-      const fieldFilters = getFieldFilters();
-      const mergedFilter = fieldFilters.length > 0
+      // Include: global filter + URL field filters + column filters
+      const columnFieldFilters = getFieldFilters();
+      const allFieldFilters = [...urlFieldFilters, ...columnFieldFilters];
+      const mergedFilter = allFieldFilters.length > 0
         ? {
           ...filter,
-          field_filters: [...(filter.field_filters || []), ...fieldFilters],
+          field_filters: [...(filter.field_filters || []), ...allFieldFilters],
         }
         : filter;
 
@@ -103,14 +180,15 @@ export function RunsPage() {
     } finally {
       setIsSelectingAll(false);
     }
-  }, [allSelected, totalFilteredRuns, filter, getFieldFilters, setSelectedRunIds]);
+  }, [allSelected, totalFilteredRuns, filter, urlFieldFilters, getFieldFilters, setSelectedRunIds]);
 
   // Fetch experiments for the dropdown
   const { data: experimentsData } = useExperiments();
   const { data: manifest } = useLatestManifest(filter.experiment_id ?? '');
   const { successCount, failedCount } = useStatusCounts(filter.experiment_id ?? null);
 
-  // Initialize filter from URL params on mount
+  // Initialize experiment_id from URL params on mount
+  // Note: field_filters are handled separately via local state (urlFieldFilters)
   useEffect(() => {
     const experimentId = searchParams.get('experiment_id');
     if (experimentId && experimentId !== filter.experiment_id) {
@@ -206,7 +284,7 @@ export function RunsPage() {
 
       {/* Toolbar row */}
       <div className="flex items-center gap-4">
-        {/* Active filters */}
+        {/* Active filters (unified display for URL and column filters) */}
         <div
           className={cn(
             'flex items-center gap-2 flex-wrap text-sm transition-opacity duration-150',
@@ -214,6 +292,23 @@ export function RunsPage() {
           )}
         >
           <span className="text-muted-foreground">Filters:</span>
+          {/* URL-based field filters (e.g., from plot click-through) */}
+          {urlFieldFilters.map((ff, index) => (
+            <span
+              key={`url-${index}`}
+              className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
+            >
+              {formatUrlFilter(ff)}
+              <button
+                onClick={() => clearUrlFilter(index)}
+                className="ml-1 hover:text-primary/70"
+                title="Remove filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          {/* Column filters */}
           {columnFilters.map((cf) => (
             <span
               key={cf.columnId}
@@ -229,10 +324,10 @@ export function RunsPage() {
             variant="ghost"
             size="sm"
             className="h-6 px-2"
-            onClick={clearAllColumnFilters}
+            onClick={clearAllFilters}
           >
             <X className="h-3 w-3 mr-1" />
-            Clear
+            Clear all
           </Button>
         </div>
 
@@ -270,7 +365,7 @@ export function RunsPage() {
 
           {/* Plot button (only when some selected) */}
           {hasSelection && (
-            <Link to={`/plots?runs=${selectedRunIds.join(',')}`}>
+            <Link to="/plots">
               <Button size="sm">
                 <BarChart3 className="h-4 w-4 mr-2" />
                 Plot
@@ -280,7 +375,7 @@ export function RunsPage() {
 
           {/* Compare button (only when some selected) */}
           {hasSelection && (
-            <Link to={`/compare?runs=${selectedRunIds.join(',')}`}>
+            <Link to="/compare">
               <Button size="sm">
                 <GitCompare className="h-4 w-4 mr-2" />
                 Compare
@@ -294,7 +389,7 @@ export function RunsPage() {
       </div>
 
       {/* Full-width table */}
-      <RunTable onTotalChange={handleTotalChange} />
+      <RunTable onTotalChange={handleTotalChange} urlFieldFilters={urlFieldFilters} />
     </div>
   );
 }

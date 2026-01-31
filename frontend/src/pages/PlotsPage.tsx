@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { PlotBuilder } from '@/components/plots/PlotBuilder';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
@@ -8,25 +8,11 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 
 export function PlotsPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { filter, updateFilter } = useAtlasStore();
-
-  // Get selected run IDs from URL params
-  const selectedRunIds = useMemo(() => {
-    const runsParam = searchParams.get('runs');
-    if (!runsParam) return [];
-    return runsParam.split(',').filter(Boolean);
-  }, [searchParams]);
+  const { filter, updateFilter, selectedRunIds, clearSelection } = useAtlasStore();
 
   const hasRunFilter = selectedRunIds.length > 0;
-
-  // Clear run filter and show all runs
-  const handleClearRunFilter = () => {
-    const newParams = new URLSearchParams(searchParams);
-    newParams.delete('runs');
-    setSearchParams(newParams);
-  };
 
   // Fetch experiments for the dropdown
   const { data: experimentsData } = useExperiments();
@@ -110,7 +96,7 @@ export function PlotsPage() {
             variant="ghost"
             size="sm"
             className="h-6 px-2"
-            onClick={handleClearRunFilter}
+            onClick={clearSelection}
           >
             <X className="h-3 w-3 mr-1" />
             Show all

@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
+import { ExportModal } from '@/components/experiments/ExportModal';
+import { ParamsDisplay, MetadataDisplay } from '@/components/detail/KeyValueDisplay';
+import { SlurmStatusBadge } from '@/components/experiments/SlurmStatusBadge';
 import {
   AlertTriangle,
   ArrowRight,
@@ -142,6 +145,9 @@ export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
   const decodedExperimentId = experimentId ? decodeURIComponent(experimentId) : '';
 
+  // Export modal state
+  const [exportOpen, setExportOpen] = useState(false);
+
   const { data: experimentsData } = useExperiments();
   const {
     data: manifest,
@@ -190,6 +196,10 @@ export function ExperimentDetailPage() {
         ]}
         actions={
           <>
+            <Button variant="outline" onClick={() => setExportOpen(true)}>
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
             <Link to={`/plots?experiment_id=${encodeURIComponent(decodedExperimentId)}`}>
               <Button variant="outline">
                 <BarChart3 className="mr-2 h-4 w-4" />
@@ -324,6 +334,11 @@ export function ExperimentDetailPage() {
                 <div className="text-sm">{formatRelativeTime(experiment?.latest_run)}</div>
               </div>
             </div>
+
+            {/* SLURM scheduler status (only shown for SLURM experiments) */}
+            <div className="mt-4">
+              <SlurmStatusBadge experimentId={decodedExperimentId} />
+            </div>
           </div>
 
           {/* Section 3: Details */}
@@ -397,7 +412,7 @@ export function ExperimentDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-72 overflow-y-auto">
                   {manifestsData.manifests.map((m) => (
                     <div
                       key={m.timestamp}
@@ -488,15 +503,7 @@ export function ExperimentDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {Object.entries(manifest.metadata).map(([key, value]) => (
-                      <CopyableField
-                        key={key}
-                        label={key}
-                        value={typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                      />
-                    ))}
-                  </div>
+                  <MetadataDisplay metadata={manifest.metadata as Record<string, unknown>} />
                 </CardContent>
               </Card>
             )}
@@ -557,113 +564,14 @@ export function ExperimentDetailPage() {
           </Card>
         </div>
       )}
+
+      {/* Export Modal */}
+      <ExportModal
+        experimentId={decodedExperimentId}
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+      />
     </div>
   );
 }
 
-/**
- * Format a value for display, handling arrays and objects
- */
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map(v => String(v)).join(', ');
-  }
-  if (typeof value === 'object' && value !== null) {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-/**
- * Display parameters based on their structure
- */
-function ParamsDisplay({ params }: { params: Record<string, unknown> }) {
-  const type = params.type as string | undefined;
-
-  // GridSource display
-  if (type === 'GridSource' && params.spec) {
-    const spec = params.spec as Record<string, unknown[]>;
-    return (
-      <div className="space-y-2">
-        <div className="space-y-2">
-          {Object.entries(spec).map(([key, values]) => (
-            <div key={key} className="border-b border-border/50 last:border-0 pb-2 last:pb-0">
-              <div className="text-muted-foreground text-sm">{key}</div>
-              <div className="font-mono text-sm break-all">
-                {formatValue(values)}
-              </div>
-            </div>
-          ))}
-        </div>
-        {params.total_cases != null && (
-          <div className="text-xs text-muted-foreground pt-1">
-            {String(params.total_cases)} total combinations
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // RandomSource display
-  if (type === 'RandomSource' && params.space) {
-    const space = params.space as Record<string, Record<string, unknown>>;
-    return (
-      <div className="space-y-2">
-        <div className="space-y-2">
-          {Object.entries(space).map(([key, dist]) => (
-            <div key={key} className="border-b border-border/50 last:border-0 pb-2 last:pb-0">
-              <div className="text-muted-foreground text-sm">{key}</div>
-              <div className="font-mono text-xs break-all">
-                {formatDistribution(dist)}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="text-xs text-muted-foreground pt-1">
-          {String(params.n_trials)} trials, seed: {String(params.seed)}
-        </div>
-      </div>
-    );
-  }
-
-  // ManualSource display
-  if (type === 'ManualSource') {
-    return (
-      <div className="text-sm">
-        <span className="text-muted-foreground">
-          {String(params.total_cases)} manually specified cases
-        </span>
-      </div>
-    );
-  }
-
-  // Fallback: show as JSON with scrolling
-  return (
-    <pre className="text-xs font-mono bg-muted/50 p-2 rounded overflow-auto max-h-64">
-      {JSON.stringify(params, null, 2)}
-    </pre>
-  );
-}
-
-/**
- * Format a distribution specification
- */
-function formatDistribution(dist: Record<string, unknown>): string {
-  const type = dist.type as string | undefined;
-
-  if (type === 'Uniform') {
-    return `Uniform(${dist.low}, ${dist.high})`;
-  }
-  if (type === 'LogUniform') {
-    return `LogUniform(${dist.low}, ${dist.high})`;
-  }
-  if (type === 'IntUniform') {
-    return `IntUniform(${dist.low}, ${dist.high})`;
-  }
-  if (type === 'Choice') {
-    const choices = dist.choices as unknown[];
-    return `Choice([${choices.slice(0, 3).join(', ')}${choices.length > 3 ? '...' : ''}])`;
-  }
-
-  return JSON.stringify(dist);
-}

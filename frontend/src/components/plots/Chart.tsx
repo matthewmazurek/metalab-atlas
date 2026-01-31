@@ -40,14 +40,26 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       return `${b.toFixed(2)} - ${next.toFixed(2)}`;
     });
 
+    // Build data with run_ids for click support
+    const runIdsPerBin = histogramData.run_ids_per_bin || [];
+    const barData = histogramData.counts.map((count, i) => ({
+      value: count,
+      runIds: runIdsPerBin[i] || [],
+    }));
+
     const option = {
       tooltip: {
         ...tooltipStyle,
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        formatter: (params: { name: string; value: number }[]) => {
-          const { name, value } = params[0];
-          return `<b>Range</b>: ${name}<br/><b>Count</b>: ${value}`;
+        trigger: 'item',
+        formatter: (params: { name: string; data: { value: number; runIds: string[] } }) => {
+          const { name, data } = params;
+          const count = data.value;
+          const runIds = data.runIds || [];
+          let html = `<b>Range</b>: ${name}<br/><b>Count</b>: ${count}`;
+          if (runIds.length > 0) {
+            html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
+          }
+          return html;
         },
       },
       xAxis: {
@@ -72,7 +84,8 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       },
       series: [{
         type: 'bar',
-        data: histogramData.counts,
+        data: barData,
+        cursor: 'pointer',
         itemStyle: {
           color: darkMode ? '#3b82f6' : '#2563eb',
         },
@@ -85,11 +98,26 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       },
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleHistogramClick = (params: any) => {
+      const runIds = params?.data?.runIds;
+      if (!runIds || !Array.isArray(runIds) || runIds.length === 0) return;
+
+      if (runIds.length === 1) {
+        navigate(`/runs/${runIds[0]}`);
+      } else {
+        const fieldFilters = [{ field: 'record.run_id', op: 'in', value: runIds }];
+        const filterParam = encodeURIComponent(JSON.stringify(fieldFilters));
+        navigate(`/runs?field_filters=${filterParam}`);
+      }
+    };
+
     return (
       <ReactECharts
         option={option}
         style={{ height: '400px', width: '100%' }}
         notMerge={true}
+        onEvents={{ click: handleHistogramClick }}
       />
     );
   }
@@ -116,11 +144,8 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
     case 'heatmap':
       option = buildHeatmapOption(data, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle);
       break;
-    case 'radar':
-      option = buildRadarOption(data, textColor, subtextColor, darkMode, tooltipStyle);
-      break;
     case 'candlestick':
-      option = buildCandlestickOption(data, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle, isXCategorical);
+      option = buildCandlestickOption(data, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle);
       break;
     case 'line':
     case 'bar':
@@ -130,10 +155,24 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       break;
   }
 
-  const handleClick = (params: { data?: { runIds?: string[] } }) => {
-    const runIds = params.data?.runIds;
-    if (runIds && runIds.length === 1) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleClick = (params: any) => {
+    // ECharts passes data in params.data - extract runIds
+    const data = params?.data;
+    if (!data) return;
+
+    // runIds might be directly on data or nested
+    const runIds = data.runIds || data.run_ids;
+    if (!runIds || !Array.isArray(runIds) || runIds.length === 0) return;
+
+    if (runIds.length === 1) {
+      // Single run: navigate directly to run details
       navigate(`/runs/${runIds[0]}`);
+    } else {
+      // Multiple runs: navigate to runs list filtered by these run IDs
+      const fieldFilters = [{ field: 'record.run_id', op: 'in', value: runIds }];
+      const filterParam = encodeURIComponent(JSON.stringify(fieldFilters));
+      navigate(`/runs?field_filters=${filterParam}`);
     }
   };
 
@@ -184,6 +223,7 @@ function buildStandardOption(
           if (runIds.length <= 3) {
             html += `<br/>${runIds.map((id) => id.slice(0, 8)).join(', ')}`;
           }
+          html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
         }
         return html;
       },
@@ -214,6 +254,7 @@ function buildStandardOption(
         type: seriesType,
         symbolSize: chartType === 'scatter' ? 10 : 6,
         showSymbol: chartType !== 'bar',
+        cursor: 'pointer', // Indicate points are clickable
         data: series.points.map((p) => ({
           value: [p.x, p.y],
           runIds: p.run_ids,
@@ -237,6 +278,8 @@ function buildStandardOption(
             renderItem: createErrorBarRenderer(subtextColor),
             data: errorData,
             z: 10, // Render on top for bar charts
+            tooltip: { show: false }, // Disable tooltip for error bars
+            silent: true, // Don't respond to mouse events
           },
         ];
       }
@@ -337,79 +380,6 @@ function buildHeatmapOption(
   };
 }
 
-// Build radar option
-function buildRadarOption(
-  data: AggregateResponse,
-  textColor: string,
-  subtextColor: string,
-  darkMode: boolean,
-  tooltipStyle: object
-) {
-  // For radar, each series becomes a radar polygon
-  // The X values become the radar axes (indicators)
-  const xValues = [...new Set(data.series.flatMap((s) => s.points.map((p) => String(p.x))))];
-
-  // Find max value for each X (indicator)
-  const maxValues: Record<string, number> = {};
-  data.series.forEach((series) => {
-    series.points.forEach((p) => {
-      const key = String(p.x);
-      maxValues[key] = Math.max(maxValues[key] || 0, p.y);
-    });
-  });
-
-  const indicators = xValues.map((x) => ({
-    name: x,
-    max: maxValues[x] * 1.2, // Add 20% padding
-  }));
-
-  const radarData = data.series.map((series) => {
-    // Map points to indicator order
-    const valueMap: Record<string, number> = {};
-    series.points.forEach((p) => {
-      valueMap[String(p.x)] = p.y;
-    });
-    return {
-      name: series.name,
-      value: xValues.map((x) => valueMap[x] || 0),
-    };
-  });
-
-  return {
-    tooltip: {
-      ...tooltipStyle,
-    },
-    legend: {
-      data: data.series.map((s) => s.name),
-      top: 'top',
-      textStyle: { color: textColor },
-    },
-    radar: {
-      indicator: indicators,
-      axisName: {
-        color: subtextColor,
-      },
-      axisLine: {
-        lineStyle: { color: darkMode ? '#404040' : '#ccc' },
-      },
-      splitLine: {
-        lineStyle: { color: darkMode ? '#404040' : '#ccc' },
-      },
-      splitArea: {
-        areaStyle: {
-          color: darkMode
-            ? ['rgba(255,255,255,0.02)', 'rgba(255,255,255,0.05)']
-            : ['rgba(0,0,0,0.02)', 'rgba(0,0,0,0.05)'],
-        },
-      },
-    },
-    series: [{
-      type: 'radar',
-      data: radarData,
-    }],
-  };
-}
-
 // Build candlestick option
 function buildCandlestickOption(
   data: AggregateResponse,
@@ -419,8 +389,7 @@ function buildCandlestickOption(
   _lineColor: string,
   darkMode: boolean,
   tooltipStyle: object,
-  axisStyle: object,
-  _isXCategorical: boolean
+  axisStyle: object
 ) {
   // Candlestick uses quartile data: [open, close, low, high] = [q1, q3, min, max]
   // We'll show all series combined or just the first one
@@ -430,15 +399,22 @@ function buildCandlestickOption(
   }
 
   const xValues = series.points.map((p) => String(p.x));
-  const candleData = series.points.map((p) => [
-    p.y_q1 ?? p.y,
-    p.y_q3 ?? p.y,
-    p.y_min ?? p.y,
-    p.y_max ?? p.y,
-  ]);
+  // Use object format to include run_ids for click support
+  const candleData = series.points.map((p) => ({
+    value: [
+      p.y_q1 ?? p.y,
+      p.y_q3 ?? p.y,
+      p.y_min ?? p.y,
+      p.y_max ?? p.y,
+    ],
+    runIds: p.run_ids,
+  }));
 
-  // Also show median as a line
-  const medianData = series.points.map((p) => p.y_median ?? p.y);
+  // Also show median as a line with run_ids
+  const medianData = series.points.map((p) => ({
+    value: p.y_median ?? p.y,
+    runIds: p.run_ids,
+  }));
 
   return {
     tooltip: {
@@ -449,6 +425,7 @@ function buildCandlestickOption(
         const idx = params[0]?.dataIndex;
         if (idx === undefined) return '';
         const p = series.points[idx];
+        const runIds = p.run_ids || [];
         let html = '';
         // Show group if there are multiple series
         if (data.series.length > 1) {
@@ -461,6 +438,9 @@ function buildCandlestickOption(
                 <b>Q1</b>: ${p.y_q1?.toFixed(4) ?? '-'}<br/>
                 <b>Min</b>: ${p.y_min?.toFixed(4) ?? '-'}<br/>
                 <b>Runs</b>: ${p.n}`;
+        if (runIds.length > 0) {
+          html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
+        }
         return html;
       },
     },
@@ -489,6 +469,7 @@ function buildCandlestickOption(
         name: series.name,
         type: 'candlestick',
         data: candleData,
+        cursor: 'pointer',
         itemStyle: {
           color: darkMode ? '#22c55e' : '#16a34a',
           color0: darkMode ? '#ef4444' : '#dc2626',
@@ -500,6 +481,7 @@ function buildCandlestickOption(
         name: 'Median',
         type: 'line',
         data: medianData,
+        cursor: 'pointer',
         symbol: 'circle',
         symbolSize: 6,
         lineStyle: {

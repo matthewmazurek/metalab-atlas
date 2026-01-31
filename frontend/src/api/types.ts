@@ -8,7 +8,7 @@ export type FilterOp = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains' | 'i
 export type AggFn = 'mean' | 'median' | 'min' | 'max' | 'count' | 'sum';
 export type ErrorBarType = 'none' | 'std' | 'sem' | 'ci95';
 export type FieldType = 'numeric' | 'string' | 'boolean' | 'unknown';
-export type ChartType = 'scatter' | 'line' | 'bar' | 'heatmap' | 'radar' | 'candlestick' | 'histogram';
+export type ChartType = 'scatter' | 'line' | 'bar' | 'heatmap' | 'candlestick' | 'histogram';
 
 // Filter models
 export interface FieldFilter {
@@ -229,4 +229,22 @@ export interface HistogramResponse {
   bins: number[];
   counts: number[];
   total: number;
+  run_ids_per_bin?: string[][] | null;
+}
+
+// SLURM status models
+export interface SlurmArrayStatusResponse {
+  job_ids: string[];
+  total: number;
+  running: number;
+  pending: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  timeout: number;
+  oom: number;
+  other: number;
+  last_squeue_at?: string | null;
+  last_sacct_at?: string | null;
+  sacct_stale: boolean;
 }

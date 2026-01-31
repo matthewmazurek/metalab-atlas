@@ -17,6 +17,7 @@ import type {
   ManifestResponse,
   RunListResponse,
   RunResponse,
+  SlurmArrayStatusResponse,
 } from './types';
 
 // Base URL for API
@@ -179,6 +180,49 @@ export async function fetchManifest(
 ): Promise<ManifestResponse> {
   const response = await api.get<ManifestResponse>(
     `/api/experiments/${encodeURIComponent(experimentId)}/manifests/${timestamp}`
+  );
+  return response.data;
+}
+
+export function getExportUrl(
+  experimentId: string,
+  options: {
+    format?: 'csv' | 'parquet';
+    include_params?: boolean;
+    include_metrics?: boolean;
+    include_derived?: boolean;
+    include_record?: boolean;
+  } = {}
+): string {
+  const params = new URLSearchParams();
+
+  if (options.format) {
+    params.set('format', options.format);
+  }
+  if (options.include_params !== undefined) {
+    params.set('include_params', String(options.include_params));
+  }
+  if (options.include_metrics !== undefined) {
+    params.set('include_metrics', String(options.include_metrics));
+  }
+  if (options.include_derived !== undefined) {
+    params.set('include_derived', String(options.include_derived));
+  }
+  if (options.include_record !== undefined) {
+    params.set('include_record', String(options.include_record));
+  }
+
+  const queryString = params.toString();
+  const path = `/api/experiments/${encodeURIComponent(experimentId)}/export`;
+
+  return `${API_BASE}${path}${queryString ? `?${queryString}` : ''}`;
+}
+
+export async function fetchSlurmStatus(
+  experimentId: string
+): Promise<SlurmArrayStatusResponse> {
+  const response = await api.get<SlurmArrayStatusResponse>(
+    `/api/experiments/${encodeURIComponent(experimentId)}/slurm-status`
   );
   return response.data;
 }

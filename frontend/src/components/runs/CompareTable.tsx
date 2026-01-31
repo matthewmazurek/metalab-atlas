@@ -4,7 +4,8 @@ import { useQueries } from '@tanstack/react-query';
 import { fetchRun } from '@/api/client';
 import { queryKeys } from '@/api/hooks';
 import { StatusBadge } from './StatusBadge';
-import { ArtifactPreviewDialog, getArtifactIcon } from '@/components/detail/ArtifactList';
+import { ArtifactPreviewDialog } from '@/components/detail/ArtifactList';
+import { getArtifactIcon } from '@/components/detail/artifact-icons';
 import {
   Table,
   TableBody,

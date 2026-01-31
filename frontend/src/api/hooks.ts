@@ -16,6 +16,7 @@ import {
   fetchHistogram,
   fetchExperimentManifests,
   fetchLatestManifest,
+  fetchSlurmStatus,
 } from './client';
 import type { AggregateRequest, FilterSpec, HistogramRequest } from './types';
 
@@ -48,6 +49,8 @@ export const queryKeys = {
     ['experimentManifests', experimentId] as const,
   latestManifest: (experimentId: string) =>
     ['latestManifest', experimentId] as const,
+  slurmStatus: (experimentId: string) =>
+    ['slurmStatus', experimentId] as const,
 };
 
 // Hooks
@@ -155,5 +158,17 @@ export function useLatestManifest(experimentId: string) {
     queryKey: queryKeys.latestManifest(experimentId),
     queryFn: () => fetchLatestManifest(experimentId),
     enabled: !!experimentId,
+  });
+}
+
+export function useSlurmStatus(experimentId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.slurmStatus(experimentId),
+    queryFn: () => fetchSlurmStatus(experimentId),
+    enabled: enabled && !!experimentId,
+    // Poll every 10 seconds for active experiments
+    refetchInterval: REFETCH_INTERVAL / 3, // 10 seconds
+    // Don't throw on 404 (experiment might not be SLURM-based)
+    retry: false,
   });
 }

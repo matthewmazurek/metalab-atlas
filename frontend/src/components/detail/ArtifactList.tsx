@@ -5,28 +5,14 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { getArtifactDownloadUrl } from '@/api/client';
 import { useArtifactPreview } from '@/api/hooks';
 import type { ArtifactInfo } from '@/api/types';
-import { Download, Eye, FileCode, FileImage, FileText, Package } from 'lucide-react';
+import { Download, Eye, Package } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ArrayChart } from './ArrayChart';
+import { getArtifactIcon } from './artifact-icons';
 
 interface ArtifactListProps {
   runId: string;
   artifacts: ArtifactInfo[];
-}
-
-export function getArtifactIcon(kind: string) {
-  switch (kind) {
-    case 'json':
-      return FileCode;
-    case 'numpy':
-      return Package;
-    case 'image':
-      return FileImage;
-    case 'text':
-      return FileText;
-    default:
-      return FileText;
-  }
 }
 
 function formatBytes(bytes: number | null | undefined): string {

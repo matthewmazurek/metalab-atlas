@@ -12,8 +12,8 @@ export default defineConfig({
     },
   },
   build: {
-    // Output to backend package for bundling
-    outDir: '../backend/atlas/static',
+    // Output to atlas package for bundling
+    outDir: '../atlas/static',
     emptyOutDir: true,
   },
 })

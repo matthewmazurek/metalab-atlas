@@ -14,7 +14,7 @@ import {
 import { StatusBadge } from './StatusBadge';
 import { ColumnHeader, type SortDirection } from './ColumnHeader';
 import { useAtlasStore } from '@/store/useAtlasStore';
-import type { RunResponse, FieldInfo } from '@/api/types';
+import type { RunResponse, FieldInfo, FilterSpec, FieldFilter } from '@/api/types';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -72,9 +72,49 @@ function formatValue(value: unknown): string {
 interface RunTableProps {
   onVisibleRunIdsChange?: (runIds: string[]) => void;
   onTotalChange?: (total: number) => void;
+  /** URL-based field filters (e.g., from plot click-through) - kept separate from global store */
+  urlFieldFilters?: FieldFilter[];
 }
 
-export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps) {
+export function RunTable({ onVisibleRunIdsChange, onTotalChange, urlFieldFilters = [] }: RunTableProps) {
+  // Compute merged filter *outside* the paged component, and key the paged component
+  // by this filter so pagination resets without a setState-in-effect.
+  const { filter, columnFilters, getFieldFilters } = useAtlasStore();
+
+  // Note: `columnFilters` is read to ensure we re-render when filters change,
+  // but we avoid threading it through hook deps (eslint false-positive).
+  void columnFilters;
+
+  const columnFieldFilters = getFieldFilters();
+  const allFieldFilters = [...urlFieldFilters, ...columnFieldFilters];
+  const mergedFilter = allFieldFilters.length === 0
+    ? filter
+    : {
+        ...filter,
+        field_filters: [...(filter.field_filters || []), ...allFieldFilters],
+      };
+
+  const filterKey = JSON.stringify(mergedFilter);
+
+  return (
+    <RunTableImpl
+      key={filterKey}
+      mergedFilter={mergedFilter}
+      onVisibleRunIdsChange={onVisibleRunIdsChange}
+      onTotalChange={onTotalChange}
+    />
+  );
+}
+
+function RunTableImpl({
+  mergedFilter,
+  onVisibleRunIdsChange,
+  onTotalChange,
+}: {
+  mergedFilter: FilterSpec;
+  onVisibleRunIdsChange?: (runIds: string[]) => void;
+  onTotalChange?: (total: number) => void;
+}) {
   const [page, setPage] = useState(0);
   const {
     filter,
@@ -85,7 +125,6 @@ export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps
     setTableSort,
     setColumnFilter,
     setColumnFilterValues,
-    getFieldFilters,
     visibleColumns: visibleColumnsMap,
     setVisibleColumns,
   } = useAtlasStore();
@@ -123,20 +162,6 @@ export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps
     }
   }, [storedVisibleColumns, fieldsData, experimentId, filter.experiment_id, setVisibleColumns]);
 
-  // Build field_filters from column filters for server-side filtering
-  const fieldFilters = useMemo(() => {
-    return getFieldFilters();
-  }, [columnFilters, getFieldFilters]);
-
-  // Merge field_filters into the filter
-  const mergedFilter = useMemo(() => {
-    if (fieldFilters.length === 0) return filter;
-    return {
-      ...filter,
-      field_filters: [...(filter.field_filters || []), ...fieldFilters],
-    };
-  }, [filter, fieldFilters]);
-
   const { data, isLoading } = useRuns({
     filter: mergedFilter,
     limit: PAGE_SIZE,
@@ -145,13 +170,7 @@ export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps
     sort_order: tableSort?.order || 'desc',
   });
 
-  // Reset to page 0 when filters change
-  const filterKey = JSON.stringify(mergedFilter);
-  useEffect(() => {
-    setPage(0);
-  }, [filterKey]);
-
-  const runs = data?.runs || [];
+  const runs = useMemo(() => data?.runs ?? [], [data?.runs]);
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
