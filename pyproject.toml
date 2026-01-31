@@ -23,6 +23,9 @@ export = [
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
 ]
+postgres = [
+    "psycopg[binary]>=3.0.0",
+]
 
 [project.scripts]
 metalab-atlas = "atlas.cli:main"

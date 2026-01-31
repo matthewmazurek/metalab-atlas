@@ -2,7 +2,7 @@
 Dependency injection for MetaLab Atlas.
 
 Provides store adapter instances based on configuration.
-Supports both local and remote (SSH) stores.
+Supports local, remote (SSH), and Postgres stores.
 """
 
 from __future__ import annotations
@@ -15,11 +15,17 @@ from typing import TYPE_CHECKING, Union
 from atlas.store import FileStoreAdapter, MultiStoreAdapter, create_store_adapter
 
 if TYPE_CHECKING:
+    from atlas.pg_store import PostgresStoreAdapter
     from atlas.remote import RemoteStoreAdapter
 
 
 # Type alias for store adapters
-StoreAdapter = Union[FileStoreAdapter, MultiStoreAdapter, "RemoteStoreAdapter"]
+StoreAdapter = Union[
+    FileStoreAdapter,
+    MultiStoreAdapter,
+    "RemoteStoreAdapter",
+    "PostgresStoreAdapter",
+]
 
 
 def get_store_path() -> str:
@@ -36,9 +42,21 @@ def get_remote_config() -> dict[str, str | None]:
     }
 
 
+def get_postgres_config() -> dict[str, str | None]:
+    """Get Postgres connection config from environment."""
+    return {
+        "artifact_root": os.environ.get("ATLAS_ARTIFACT_ROOT"),
+    }
+
+
 def is_remote_url(path: str) -> bool:
-    """Check if a path is a remote URL."""
-    return path.startswith("ssh://") or ("@" in path and ":" in path)
+    """Check if a path is a remote SSH URL."""
+    return path.startswith("ssh://") or ("@" in path and ":" in path and not path.startswith("postgres"))
+
+
+def is_postgres_url(path: str) -> bool:
+    """Check if a path is a PostgreSQL URL."""
+    return path.startswith("postgresql://") or path.startswith("postgres://")
 
 
 @lru_cache(maxsize=1)
@@ -63,6 +81,20 @@ def _get_remote_store_singleton(
     )
 
 
+@lru_cache(maxsize=1)
+def _get_postgres_store_singleton(
+    url: str,
+    artifact_root: str | None,
+) -> "PostgresStoreAdapter":
+    """Create cached Postgres store adapter instance."""
+    from atlas.pg_store import PostgresStoreAdapter
+
+    return PostgresStoreAdapter(
+        connection_string=url,
+        artifact_root=artifact_root,
+    )
+
+
 def get_store() -> StoreAdapter:
     """
     Dependency that provides the store adapter.
@@ -72,12 +104,20 @@ def get_store() -> StoreAdapter:
 
     Supports:
     - Local paths: Creates FileStoreAdapter or MultiStoreAdapter
-    - Remote URLs: Creates RemoteStoreAdapter (ssh://user@host/path or user@host:/path)
+    - Remote SSH URLs: Creates RemoteStoreAdapter (ssh://user@host/path or user@host:/path)
+    - Postgres URLs: Creates PostgresStoreAdapter (postgresql://user@host:port/db)
 
     If the path contains multiple experiment stores in subdirectories,
     a MultiStoreAdapter is returned that aggregates all stores.
     """
     store_path = get_store_path()
+
+    if is_postgres_url(store_path):
+        config = get_postgres_config()
+        return _get_postgres_store_singleton(
+            store_path,
+            config["artifact_root"],
+        )
 
     if is_remote_url(store_path):
         config = get_remote_config()
@@ -96,6 +136,7 @@ def reset_store_cache() -> None:
     """Reset the store cache (for testing)."""
     _get_local_store_singleton.cache_clear()
     _get_remote_store_singleton.cache_clear()
+    _get_postgres_store_singleton.cache_clear()
 
 
 def refresh_stores() -> int:

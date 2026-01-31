@@ -11,6 +11,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import (
     FilterSpec,
@@ -20,8 +23,6 @@ from atlas.models import (
     SlurmArrayStatusResponse,
     StatusCounts,
 )
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +259,10 @@ def _get_experiment_store_path(
                         with open(manifest_path) as f:
                             manifest = json.load(f)
                         if manifest.get("experiment_id") == experiment_id:
-                            _experiment_store_cache[experiment_id] = (str(local_path), now)
+                            _experiment_store_cache[experiment_id] = (
+                                str(local_path),
+                                now,
+                            )
                             return str(local_path)
                     except Exception:
                         pass
@@ -447,7 +451,9 @@ async def get_slurm_status(
     oom = sacct_counts.get("OUT_OF_MEMORY", 0)
 
     # Calculate other
-    accounted = running + pending + completing + completed + failed + cancelled + timeout + oom
+    accounted = (
+        running + pending + completing + completed + failed + cancelled + timeout + oom
+    )
     other = max(0, total_runs - accounted)
 
     # Add completing to running for simplicity

@@ -305,7 +305,7 @@ class FileStoreAdapter:
                 elif ff.op == FilterOp.IN:
                     # Get comparable value: use .value for enums, str() for others
                     # Field index stores values as strings (e.g., bool True -> "True")
-                    cmp_value = value.value if hasattr(value, 'value') else str(value)
+                    cmp_value = value.value if hasattr(value, "value") else str(value)
                     match = cmp_value in ff.value
             except (TypeError, ValueError):
                 continue

@@ -36,10 +36,14 @@ async def histogram(
     }
     ```
     """
-    # Query runs with filter
+    # Use SQL pushdown if available (PostgresStoreAdapter)
+    if hasattr(store, "compute_histogram_sql"):
+        return store.compute_histogram_sql(request)
+
+    # Fallback to in-memory histogram
     runs, _ = store.query_runs(
         filter=request.filter,
-        limit=10000,  # Get all matching runs
+        limit=100000,  # Get all matching runs
         offset=0,
     )
 

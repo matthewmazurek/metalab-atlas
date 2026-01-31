@@ -41,10 +41,14 @@ async def aggregate(
     }
     ```
     """
-    # Query runs with filter
+    # Use SQL pushdown if available (PostgresStoreAdapter)
+    if hasattr(store, "compute_aggregate_sql"):
+        return store.compute_aggregate_sql(request)
+
+    # Fallback to in-memory aggregation
     runs, _ = store.query_runs(
         filter=request.filter,
-        limit=10000,  # Get all matching runs for aggregation
+        limit=100000,  # Get all matching runs for aggregation
         offset=0,
     )
 

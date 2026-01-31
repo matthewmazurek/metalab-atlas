@@ -458,9 +458,7 @@ class SlurmArrayStatusResponse(BaseModel):
     failed: int = Field(default=0, description="Tasks that failed (FAILED)")
     cancelled: int = Field(default=0, description="Cancelled tasks (CANCELLED)")
     timeout: int = Field(default=0, description="Tasks that timed out (TIMEOUT)")
-    oom: int = Field(
-        default=0, description="Out of memory tasks (OUT_OF_MEMORY)"
-    )
+    oom: int = Field(default=0, description="Out of memory tasks (OUT_OF_MEMORY)")
     other: int = Field(
         default=0, description="Other states (HELD, SUSPENDED, REQUEUED, etc.)"
     )
