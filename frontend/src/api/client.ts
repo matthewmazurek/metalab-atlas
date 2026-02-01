@@ -4,12 +4,12 @@
 
 import axios from 'axios';
 import type {
-  AggregateRequest,
-  AggregateResponse,
   ArtifactInfo,
   ArtifactPreview,
   ExperimentsResponse,
   FieldIndex,
+  FieldValuesRequest,
+  FieldValuesResponse,
   FilterSpec,
   HistogramRequest,
   HistogramResponse,
@@ -142,8 +142,8 @@ export async function fetchExperiments(): Promise<ExperimentsResponse> {
   return response.data;
 }
 
-export async function fetchAggregate(request: AggregateRequest): Promise<AggregateResponse> {
-  const response = await api.post<AggregateResponse>('/api/aggregate', request);
+export async function fetchFieldValues(request: FieldValuesRequest): Promise<FieldValuesResponse> {
+  const response = await api.post<FieldValuesResponse>('/api/fields/values', request);
   return response.data;
 }
 
@@ -193,6 +193,7 @@ export function getExportUrl(
     include_metrics?: boolean;
     include_derived?: boolean;
     include_record?: boolean;
+    include_data?: boolean;
   } = {}
 ): string {
   const params = new URLSearchParams();
@@ -211,6 +212,9 @@ export function getExportUrl(
   }
   if (options.include_record !== undefined) {
     params.set('include_record', String(options.include_record));
+  }
+  if (options.include_data !== undefined) {
+    params.set('include_data', String(options.include_data));
   }
 
   const queryString = params.toString();

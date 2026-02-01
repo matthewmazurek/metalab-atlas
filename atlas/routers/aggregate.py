@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from atlas.aggregate import compute_aggregate
+from atlas.capabilities import SupportsSqlPushdown
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import AggregateRequest, AggregateResponse
 
@@ -42,7 +43,7 @@ async def aggregate(
     ```
     """
     # Use SQL pushdown if available (PostgresStoreAdapter)
-    if hasattr(store, "compute_aggregate_sql"):
+    if isinstance(store, SupportsSqlPushdown):
         return store.compute_aggregate_sql(request)
 
     # Fallback to in-memory aggregation

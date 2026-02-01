@@ -569,6 +569,11 @@ class RemoteStoreAdapter:
     - Artifact previews
 
     Artifacts and logs are fetched lazily on demand.
+
+    Implements:
+    - SupportsRemoteExec: execute commands on remote host
+    - SupportsStorePaths: exposes local mirror path
+    - SupportsRefresh: force re-sync from remote
     """
 
     def __init__(
@@ -701,6 +706,18 @@ class RemoteStoreAdapter:
         return self._get_delegate().get_experiment_manifest(experiment_id, timestamp)
 
     # =========================================================================
+    # Structured results (capture.data)
+    # =========================================================================
+
+    def list_results(self, run_id: str) -> list[str]:
+        """List result names for a run (capture.data)."""
+        return self._get_delegate().list_results(run_id)
+
+    def get_result(self, run_id: str, name: str) -> dict[str, Any] | None:
+        """Get structured result data for a run (capture.data)."""
+        return self._get_delegate().get_result(run_id, name)
+
+    # =========================================================================
     # Lazy-loaded methods - artifacts and logs fetched on demand
     # =========================================================================
 
@@ -770,11 +787,53 @@ class RemoteStoreAdapter:
         return self._mirror.list_logs(run_id)
 
     # =========================================================================
-    # Control methods
+    # Capability: SupportsRemoteExec
+    # =========================================================================
+
+    def exec_remote_command(
+        self,
+        command: str,
+        timeout: float = 30.0,
+    ) -> tuple[int, str, str]:
+        """
+        Execute a command on the remote host.
+
+        Implements SupportsRemoteExec capability.
+
+        Args:
+            command: The shell command to execute.
+            timeout: Command timeout in seconds.
+
+        Returns:
+            Tuple of (exit_code, stdout, stderr).
+        """
+        return self._conn.exec_command(command, timeout=timeout)
+
+    # =========================================================================
+    # Capability: SupportsStorePaths
+    # =========================================================================
+
+    def get_store_paths(self) -> list[Path]:
+        """
+        Return list containing the local mirror path.
+
+        Implements SupportsStorePaths capability.
+
+        Note: Returns the local mirror path, not the remote path.
+        """
+        return [self._mirror.local_store_path]
+
+    @property
+    def store_path(self) -> Path:
+        """Return the local mirror store path (convenience property)."""
+        return self._mirror.local_store_path
+
+    # =========================================================================
+    # Control methods / Capability: SupportsRefresh
     # =========================================================================
 
     def refresh(self) -> None:
-        """Force refresh of cached data."""
+        """Force refresh of cached data. Implements SupportsRefresh capability."""
         self._ensure_synced(force=True)
         self._artifact_cache_times.clear()
 

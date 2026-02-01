@@ -7,6 +7,7 @@ with optional metadata embedding for provenance tracking.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,39 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from atlas.models import RunResponse
+from atlas.store import StoreAdapter
+
+
+def collect_captured_data_json(
+    store: StoreAdapter,
+    run_ids: list[str],
+) -> dict[str, str | None]:
+    """
+    Collect capture.data() structured results for a set of runs.
+
+    Returns a mapping of run_id -> JSON string (or None if no structured results).
+    """
+    out: dict[str, str | None] = {}
+    for run_id in run_ids:
+        names = store.list_results(run_id)
+        if not names:
+            out[run_id] = None
+            continue
+
+        payload: dict[str, Any] = {}
+        for name in sorted(names):
+            result = store.get_result(run_id, name)
+            if result is None:
+                continue
+            payload[name] = result
+
+        out[run_id] = (
+            json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+            if payload
+            else None
+        )
+
+    return out
 
 
 def runs_to_dataframe(
@@ -23,6 +57,8 @@ def runs_to_dataframe(
     include_metrics: bool = True,
     include_derived: bool = True,
     include_record: bool = True,
+    include_data: bool = True,
+    captured_data_json: dict[str, str | None] | None = None,
 ) -> "pd.DataFrame":
     """
     Flatten runs to a pandas DataFrame.
@@ -39,6 +75,8 @@ def runs_to_dataframe(
         include_metrics: Include metrics columns.
         include_derived: Include derived metrics columns (prefixed with 'derived_').
         include_record: Include record fields (run_id, status, timestamps, etc.).
+        include_data: Include capture.data() structured results as JSON string column.
+        captured_data_json: Optional mapping of run_id -> JSON string (or None).
 
     Returns:
         pandas DataFrame with flattened run data.
@@ -66,6 +104,10 @@ def runs_to_dataframe(
             row["finished_at"] = (
                 run.record.finished_at.isoformat() if run.record.finished_at else None
             )
+
+        if include_data:
+            mapping = captured_data_json or {}
+            row["captured_data"] = mapping.get(run.record.run_id)
 
         if include_params:
             for key, value in run.params.items():

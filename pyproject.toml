@@ -5,7 +5,7 @@ description = "Dashboard for exploring metalab experiment runs"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "metalab",
+    "metalab[postgres]",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.0.0",
@@ -22,9 +22,6 @@ dev = [
 export = [
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
-]
-postgres = [
-    "psycopg[binary]>=3.0.0",
 ]
 
 [project.scripts]

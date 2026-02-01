@@ -12,14 +12,14 @@ import {
   fetchLogsList,
   fetchFields,
   fetchExperiments,
-  fetchAggregate,
+  fetchFieldValues,
   fetchHistogram,
   fetchExperimentManifests,
   fetchLatestManifest,
   fetchSlurmStatus,
   fetchStatusCounts,
 } from './client';
-import type { AggregateRequest, FilterSpec, HistogramRequest } from './types';
+import type { FieldValuesRequest, FilterSpec, HistogramRequest } from './types';
 
 // Auto-refresh interval for list views (30 seconds)
 const REFETCH_INTERVAL = 30 * 1000;
@@ -44,7 +44,7 @@ export const queryKeys = {
   logsList: (runId: string) => ['logsList', runId] as const,
   fields: (experimentId?: string) => ['fields', experimentId] as const,
   experiments: () => ['experiments'] as const,
-  aggregate: (request: AggregateRequest) => ['aggregate', request] as const,
+  fieldValues: (request: FieldValuesRequest) => ['fieldValues', request] as const,
   histogram: (request: HistogramRequest) => ['histogram', request] as const,
   experimentManifests: (experimentId: string) =>
     ['experimentManifests', experimentId] as const,
@@ -132,19 +132,31 @@ export function useExperiments() {
   });
 }
 
-export function useAggregate(request: AggregateRequest, enabled = true) {
+export function useFieldValues(request: FieldValuesRequest, enabled = true) {
+  // Serialize filter for stable query key (objects can have same content but different references)
+  const filterKey = request.filter ? JSON.stringify(request.filter) : 'none';
+
   return useQuery({
-    queryKey: queryKeys.aggregate(request),
-    queryFn: () => fetchAggregate(request),
-    enabled: enabled && !!request.x_field && !!request.y_field,
+    queryKey: ['fieldValues', request.fields, filterKey, request.max_points, request.seed],
+    queryFn: () => fetchFieldValues(request),
+    enabled: enabled && request.fields.length > 0,
+    // Plots don't need auto-refresh - keep data stable
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 }
 
-export function useHistogram(request: HistogramRequest, enabled = true) {
+export function useHistogram(request: HistogramRequest | null, enabled = true) {
+  // Serialize filter for stable query key
+  const filterKey = request?.filter ? JSON.stringify(request.filter) : 'none';
+
   return useQuery({
-    queryKey: queryKeys.histogram(request),
-    queryFn: () => fetchHistogram(request),
-    enabled: enabled && !!request.field,
+    queryKey: ['histogram', request?.field, request?.bin_count, filterKey],
+    queryFn: () => fetchHistogram(request!),
+    enabled: enabled && !!request?.field,
+    // Histograms don't need auto-refresh - keep data stable
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 }
 

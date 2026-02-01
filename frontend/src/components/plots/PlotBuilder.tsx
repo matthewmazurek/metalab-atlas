@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react';
-import { useFields, useAggregate, useHistogram } from '@/api/hooks';
+import { useEffect, useMemo, useState } from 'react';
+import { useFields, useFieldValues } from '@/api/hooks';
 import { useAtlasStore } from '@/store/useAtlasStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -12,21 +13,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { FieldSelector } from './FieldSelector';
 import { Chart } from './Chart';
-import type { AggFn, ChartType, ErrorBarType, FilterSpec } from '@/api/types';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import type { AggFn, ChartType, ErrorBarType, FilterSpec, HistogramResponse } from '@/api/types';
+import { AlertCircle, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 const CHART_TYPE_OPTIONS: { value: ChartType; label: string }[] = [
   { value: 'scatter', label: 'Scatter' },
   { value: 'line', label: 'Line' },
   { value: 'bar', label: 'Bar' },
-  { value: 'heatmap', label: 'Heatmap' },
-  { value: 'candlestick', label: 'Candlestick' },
   { value: 'histogram', label: 'Histogram' },
 ];
 
 const AGG_OPTIONS: { value: AggFn; label: string }[] = [
+  { value: 'none', label: 'None (raw points)' },
   { value: 'mean', label: 'Mean' },
   { value: 'median', label: 'Median' },
   { value: 'min', label: 'Min' },
@@ -38,38 +39,82 @@ const ERROR_OPTIONS: { value: ErrorBarType; label: string }[] = [
   { value: 'none', label: 'None' },
   { value: 'std', label: 'Standard Deviation' },
   { value: 'sem', label: 'Standard Error' },
-  { value: 'ci95', label: '95% CI' },
 ];
 
-interface PlotBuilderProps {
-  /** Optional list of run IDs to filter the plot data to */
-  runIds?: string[];
+// Compute histogram bins from raw values (client-side)
+function computeHistogram(
+  values: (number | string | null)[],
+  binCount: number
+): HistogramResponse {
+  const numericValues = values
+    .map(v => typeof v === 'string' ? parseFloat(v) : v)
+    .filter((v): v is number => v !== null && !isNaN(v));
+
+  if (numericValues.length === 0) {
+    return { field: '', bins: [0, 1], counts: [0], total: 0 };
+  }
+
+  const min = Math.min(...numericValues);
+  const max = Math.max(...numericValues);
+  const binWidth = (max - min) / binCount || 1;
+
+  const bins: number[] = [];
+  for (let i = 0; i <= binCount; i++) {
+    bins.push(min + i * binWidth);
+  }
+
+  const counts = new Array(binCount).fill(0);
+  for (const v of numericValues) {
+    const binIndex = Math.min(Math.floor((v - min) / binWidth), binCount - 1);
+    counts[binIndex]++;
+  }
+
+  return { field: '', bins, counts, total: numericValues.length };
 }
 
-export function PlotBuilder({ runIds }: PlotBuilderProps) {
+interface PlotBuilderProps {
+  /** Optional list of run IDs to filter the plot data to (for explicit selection) */
+  runIds?: string[];
+  /** Optional filter spec to use directly (for filter-based selection) */
+  selectionFilter?: FilterSpec;
+}
+
+export function PlotBuilder({ runIds, selectionFilter }: PlotBuilderProps) {
   const { filter, plotConfig, setPlotConfig, updatePlotConfig } = useAtlasStore();
   const { data: fieldIndex, isLoading: fieldsLoading } = useFields(filter.experiment_id || undefined);
 
-  // Build filter with optional run ID filtering
+  // Seed for reproducible sampling
+  const [sampleSeed, setSampleSeed] = useState(42);
+
+  // Build filter with optional run ID or filter-based selection
   const effectiveFilter: FilterSpec = useMemo(() => {
-    if (!runIds || runIds.length === 0) {
-      return filter;
+    // If we have a selection filter (from "Select All"), use it directly
+    // This is much more efficient than passing 300k+ run IDs
+    if (selectionFilter) {
+      return selectionFilter;
     }
-    // Add a field filter to restrict to the selected run IDs
-    return {
-      ...filter,
-      field_filters: [
-        ...(filter.field_filters || []),
-        {
-          field: 'record.run_id',
-          op: 'in',
-          value: runIds,
-        },
-      ],
-    };
-  }, [filter, runIds]);
+
+    // If we have explicit run IDs, add them as a field filter
+    if (runIds && runIds.length > 0) {
+      return {
+        ...filter,
+        field_filters: [
+          ...(filter.field_filters || []),
+          {
+            field: 'record.run_id',
+            op: 'in',
+            value: runIds,
+          },
+        ],
+      };
+    }
+
+    // Fallback to global filter (shouldn't happen with mandatory selection)
+    return filter;
+  }, [filter, runIds, selectionFilter]);
 
   const isHistogram = plotConfig?.chart_type === 'histogram';
+  const isAggregating = plotConfig?.agg_fn && plotConfig.agg_fn !== 'none';
 
   // Initialize plot config if not set
   useEffect(() => {
@@ -78,58 +123,64 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
         x_field: '',
         y_field: '',
         group_by: [],
-        agg_fn: 'mean',
-        error_bars: 'std',
-        reduce_replicates: true,
         chart_type: 'scatter',
         bin_count: 20,
+        agg_fn: 'none',
+        error_bars: 'none',
+        aggregate_replicates: true,
       });
     }
   }, [plotConfig, setPlotConfig]);
 
-  // Aggregate request for non-histogram charts
-  const aggregateRequest = plotConfig && !isHistogram
-    ? {
-      filter: effectiveFilter,
-      x_field: plotConfig.x_field,
-      y_field: plotConfig.y_field,
-      group_by: plotConfig.group_by.length > 0 ? plotConfig.group_by : undefined,
-      agg_fn: plotConfig.agg_fn,
-      error_bars: plotConfig.error_bars,
-      reduce_replicates: plotConfig.reduce_replicates,
+  // Determine which fields to fetch
+  const fieldsToFetch = useMemo(() => {
+    if (!plotConfig) return [];
+    if (isHistogram) {
+      return plotConfig.y_field ? [plotConfig.y_field] : [];
     }
-    : null;
-
-  // Histogram request
-  const histogramRequest = plotConfig && isHistogram
-    ? {
-      filter: effectiveFilter,
-      field: plotConfig.y_field,
-      bin_count: plotConfig.bin_count,
+    const fields: string[] = [];
+    if (plotConfig.x_field) fields.push(plotConfig.x_field);
+    if (plotConfig.y_field) fields.push(plotConfig.y_field);
+    if (plotConfig.group_by?.[0]) fields.push(plotConfig.group_by[0]);
+    // When NOT aggregating replicates, we need seed_fingerprint to show individual seeds
+    if (isAggregating && !plotConfig.aggregate_replicates) {
+      fields.push('record.seed_fingerprint');
     }
-    : null;
+    return fields;
+  }, [plotConfig, isHistogram, isAggregating]);
 
+  // Fetch field values
   const {
-    data: aggregateData,
-    isLoading: aggLoading,
-    isError: aggError,
-  } = useAggregate(
-    aggregateRequest!,
-    !!aggregateRequest && !!plotConfig?.x_field && !!plotConfig?.y_field
+    data: fieldValuesData,
+    isLoading: valuesLoading,
+    isError: valuesError,
+  } = useFieldValues(
+    {
+      filter: effectiveFilter,
+      fields: fieldsToFetch,
+      max_points: 10000,
+      include_run_ids: true,
+      seed: sampleSeed,
+    },
+    fieldsToFetch.length > 0
   );
 
-  const {
-    data: histogramData,
-    isLoading: histLoading,
-    isError: histError,
-  } = useHistogram(
-    histogramRequest!,
-    !!histogramRequest && !!plotConfig?.y_field
-  );
+  // Handler to resample with a new random seed
+  const handleResample = () => {
+    setSampleSeed(Math.floor(Math.random() * 100000));
+  };
 
-  const isLoading = isHistogram ? histLoading : aggLoading;
-  const isError = isHistogram ? histError : aggError;
+  // Compute histogram data client-side
+  const histogramData = useMemo((): HistogramResponse | null => {
+    if (!isHistogram || !fieldValuesData || !plotConfig?.y_field) return null;
+    const values = fieldValuesData.fields[plotConfig.y_field] || [];
+    return computeHistogram(values, plotConfig.bin_count || 20);
+  }, [isHistogram, fieldValuesData, plotConfig]);
+
+  const isLoading = valuesLoading;
+  const isError = valuesError;
   const hasRequiredFields = isHistogram ? !!plotConfig?.y_field : (!!plotConfig?.x_field && !!plotConfig?.y_field);
+  const isSampled = fieldValuesData?.sampled ?? false;
 
   if (fieldsLoading) {
     return (
@@ -212,7 +263,7 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
               <div className="space-y-2">
                 <Label>Aggregation</Label>
                 <Select
-                  value={plotConfig?.agg_fn || 'mean'}
+                  value={plotConfig?.agg_fn || 'none'}
                   onValueChange={(v) => updatePlotConfig({ agg_fn: v as AggFn })}
                 >
                   <SelectTrigger>
@@ -228,37 +279,41 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Error Bars</Label>
-                <Select
-                  value={plotConfig?.error_bars || 'none'}
-                  onValueChange={(v) => updatePlotConfig({ error_bars: v as ErrorBarType })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ERROR_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isAggregating && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Error Bars</Label>
+                    <Select
+                      value={plotConfig?.error_bars || 'none'}
+                      onValueChange={(v) => updatePlotConfig({ error_bars: v as ErrorBarType })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ERROR_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="reduce-replicates"
-                  checked={plotConfig?.reduce_replicates ?? true}
-                  onCheckedChange={(checked) =>
-                    updatePlotConfig({ reduce_replicates: checked as boolean })
-                  }
-                />
-                <Label htmlFor="reduce-replicates" className="cursor-pointer">
-                  Aggregate replicates
-                </Label>
-              </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="aggregate-replicates"
+                      checked={plotConfig?.aggregate_replicates ?? true}
+                      onCheckedChange={(checked) =>
+                        updatePlotConfig({ aggregate_replicates: checked as boolean })
+                      }
+                    />
+                    <Label htmlFor="aggregate-replicates" className="cursor-pointer text-sm">
+                      Aggregate replicates
+                    </Label>
+                  </div>
+                </>
+              )}
             </>
           )}
         </CardContent>
@@ -266,7 +321,7 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
 
       {/* Chart */}
       <Card className="col-span-3">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle>
             {isHistogram ? (
               `Distribution of ${plotConfig?.y_field || 'Field'}`
@@ -277,6 +332,25 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
               </>
             )}
           </CardTitle>
+          {/* Sampling indicator with resample button */}
+          {isSampled && (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">
+                <AlertTriangle className="h-3 w-3 mr-1" />
+                Sampled ({fieldValuesData?.returned?.toLocaleString()} of {fieldValuesData?.total?.toLocaleString()})
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleResample}
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title="Draw a new random sample"
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Resample
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {!hasRequiredFields ? (
@@ -292,11 +366,18 @@ export function PlotBuilder({ runIds }: PlotBuilderProps) {
               <AlertCircle className="h-8 w-8 mb-2" />
               <p>Failed to load plot data</p>
             </div>
-          ) : (aggregateData || histogramData) ? (
+          ) : (fieldValuesData || histogramData) ? (
             <Chart
-              data={aggregateData}
+              fieldValuesData={fieldValuesData}
               histogramData={histogramData}
               chartType={plotConfig?.chart_type || 'scatter'}
+              xField={plotConfig?.x_field}
+              yField={plotConfig?.y_field}
+              groupByField={plotConfig?.group_by?.[0]}
+              aggFn={plotConfig?.agg_fn || 'none'}
+              errorBars={plotConfig?.error_bars || 'none'}
+              aggregateReplicates={plotConfig?.aggregate_replicates ?? true}
+              experimentId={filter.experiment_id || undefined}
             />
           ) : null}
         </CardContent>

@@ -17,6 +17,7 @@ import { useAtlasStore } from '@/store/useAtlasStore';
 import type { RunResponse, FieldInfo, FilterSpec, FieldFilter } from '@/api/types';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/datetime';
 
 const PAGE_SIZE = 25;
 
@@ -31,19 +32,6 @@ interface ColumnDef {
   stickyOffset?: number; // Left offset for sticky positioning
   render: (run: RunResponse) => React.ReactNode;
   getValue?: (run: RunResponse) => string;
-}
-
-/**
- * Format a date string as relative time for recent dates
- */
-function formatRelativeTime(dateStr: string): string {
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-
-  if (diffHours < 1) return 'just now';
-  if (diffHours < 24) return `${Math.round(diffHours)}h ago`;
-  if (diffHours < 168) return `${Math.round(diffHours / 24)}d ago`;
-  return new Date(dateStr).toLocaleDateString();
 }
 
 /**
@@ -90,9 +78,9 @@ export function RunTable({ onVisibleRunIdsChange, onTotalChange, urlFieldFilters
   const mergedFilter = allFieldFilters.length === 0
     ? filter
     : {
-        ...filter,
-        field_filters: [...(filter.field_filters || []), ...allFieldFilters],
-      };
+      ...filter,
+      field_filters: [...(filter.field_filters || []), ...allFieldFilters],
+    };
 
   const filterKey = JSON.stringify(mergedFilter);
 
@@ -121,6 +109,7 @@ function RunTableImpl({
     tableSort,
     columnFilters,
     selectedRunIds,
+    selectionFilter,
     toggleRunSelection,
     setTableSort,
     setColumnFilter,
@@ -128,6 +117,14 @@ function RunTableImpl({
     visibleColumns: visibleColumnsMap,
     setVisibleColumns,
   } = useAtlasStore();
+
+  // Helper to check if a run is selected (handles both explicit and filter-based selection)
+  const isRunSelected = (runId: string) => {
+    // If we have filter-based selection, all visible runs are selected
+    if (selectionFilter !== null) return true;
+    // Otherwise check explicit selection
+    return selectedRunIds.includes(runId);
+  };
 
   const experimentId = filter.experiment_id ?? '_all';
 
@@ -430,14 +427,14 @@ function RunTableImpl({
   return (
     <div className="space-y-2">
       {/* Table with horizontal scroll */}
-      <div className="border rounded-lg overflow-x-auto">
+      <div className="border border-border/60 rounded-xl overflow-x-auto bg-card shadow-sm">
         <Table className="min-w-max">
           <TableHeader>
             <TableRow>
               {/* Checkbox column - sticky */}
               <TableHead
                 className={cn(
-                  'w-10 align-middle bg-background',
+                  'w-10 align-middle bg-card',
                   'sticky left-0 z-20'
                 )}
               />
@@ -447,7 +444,7 @@ function RunTableImpl({
                   <TableHead
                     key={col.id}
                     className={cn(
-                      'align-middle whitespace-nowrap bg-background',
+                      'align-middle whitespace-nowrap bg-muted/10',
                       col.sticky && 'sticky z-20',
                     )}
                     style={col.sticky ? { left: col.stickyOffset } : undefined}
@@ -491,7 +488,7 @@ function RunTableImpl({
                 <TableRow
                   key={run.record.run_id}
                   data-state={
-                    selectedRunIds.includes(run.record.run_id)
+                    isRunSelected(run.record.run_id)
                       ? 'selected'
                       : undefined
                   }
@@ -499,12 +496,12 @@ function RunTableImpl({
                   {/* Checkbox - sticky */}
                   <TableCell
                     className={cn(
-                      'align-middle bg-background',
+                      'align-middle bg-card',
                       'sticky left-0 z-10'
                     )}
                   >
                     <Checkbox
-                      checked={selectedRunIds.includes(run.record.run_id)}
+                      checked={isRunSelected(run.record.run_id)}
                       onCheckedChange={() => toggleRunSelection(run.record.run_id)}
                     />
                   </TableCell>
@@ -512,7 +509,7 @@ function RunTableImpl({
                     <TableCell
                       key={col.id}
                       className={cn(
-                        'align-middle bg-background',
+                        'align-middle bg-card',
                         col.sticky && 'sticky z-10',
                       )}
                       style={col.sticky ? { left: col.stickyOffset } : undefined}

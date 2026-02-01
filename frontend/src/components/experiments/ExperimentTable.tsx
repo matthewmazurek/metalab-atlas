@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import { useExperiments, useRuns, queryKeys } from '@/api/hooks';
 import { fetchLatestManifest, fetchRuns } from '@/api/client';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
 import {
   Table,
@@ -24,6 +25,7 @@ import {
   Beaker,
   X,
 } from 'lucide-react';
+import { formatRelativeTime, parseApiDate } from '@/lib/datetime';
 
 const PAGE_SIZE = 25;
 
@@ -137,20 +139,6 @@ function useExperimentStatuses(experimentIds: string[]) {
 }
 
 /**
- * Format a date string as relative time for recent dates
- */
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '—';
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-
-  if (diffHours < 1) return 'just now';
-  if (diffHours < 24) return `${Math.round(diffHours)}h ago`;
-  if (diffHours < 168) return `${Math.round(diffHours / 24)}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
-
-/**
  * Hook to get status counts for an experiment
  */
 function useExperimentStatus(experimentId: string) {
@@ -210,7 +198,7 @@ function ExperimentRow({
 
   return (
     <TableRow
-      className="cursor-pointer hover:bg-accent/50"
+      className="cursor-pointer"
       onClick={handleRowClick}
     >
       {/* Name with status indicator */}
@@ -248,15 +236,9 @@ function ExperimentRow({
 
       {/* Status badge */}
       <TableCell>
-        {isComplete ? (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-            Complete
-          </span>
-        ) : (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-            In progress
-          </span>
-        )}
+        <Badge variant={isComplete ? 'success' : 'info'}>
+          {isComplete ? 'Complete' : 'In progress'}
+        </Badge>
       </TableCell>
 
       {/* Total */}
@@ -456,8 +438,8 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
           comparison = (aStatus?.runningCount ?? 0) - (bStatus?.runningCount ?? 0);
           break;
         case 'latest_run': {
-          const aTime = a.latest_run ? new Date(a.latest_run).getTime() : 0;
-          const bTime = b.latest_run ? new Date(b.latest_run).getTime() : 0;
+          const aTime = parseApiDate(a.latest_run)?.getTime() ?? 0;
+          const bTime = parseApiDate(b.latest_run)?.getTime() ?? 0;
           comparison = aTime - bTime;
           break;
         }
@@ -559,7 +541,7 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
       )}
 
       {/* Table */}
-      <div className="border rounded-lg overflow-x-auto">
+      <div className="border border-border/60 rounded-xl overflow-x-auto bg-card shadow-sm">
         <Table>
           <TableHeader>
             <TableRow>

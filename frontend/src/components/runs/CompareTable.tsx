@@ -114,7 +114,7 @@ function SectionRow({ label, colSpan }: { label: string; colSpan: number }) {
     <TableRow className="bg-muted/30 hover:bg-muted/30">
       {/* Sticky label cell */}
       <TableCell
-        className="py-1.5 font-medium text-xs uppercase tracking-wide text-muted-foreground sticky left-0 z-10 bg-muted/30 !border-r !border-r-border"
+        className="py-1.5 font-medium text-xs uppercase tracking-wide text-muted-foreground sticky left-0 z-10 bg-muted/30 !border-r !border-r-border/60"
       >
         {label}
       </TableCell>
@@ -203,12 +203,12 @@ export function CompareTable({ runIds }: CompareTableProps) {
   const totalCols = runs.length + 1;
 
   return (
-    <div className="border rounded-lg overflow-x-auto">
+    <div className="border border-border/60 rounded-xl overflow-x-auto bg-card shadow-sm">
       <Table className="border-separate border-spacing-0">
         <TableHeader>
           <TableRow className="h-16">
             {/* Sticky field name column header - empty to avoid confusion */}
-            <TableHead className="sticky left-0 z-20 bg-background min-w-[120px] !border-r !border-r-border">
+            <TableHead className="sticky left-0 z-20 bg-muted/10 min-w-[120px] !border-r !border-r-border/60">
               {/* Intentionally empty */}
             </TableHead>
             {/* Run column headers */}
@@ -243,7 +243,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
         <TableBody>
           {/* Baseline row */}
           <TableRow>
-            <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground font-medium !border-r !border-r-border">
+            <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground font-medium !border-r !border-r-border/60">
               Baseline
             </TableCell>
             {runs.map((run) => {
@@ -278,7 +278,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
 
           {/* Status row */}
           <TableRow>
-            <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground font-medium !border-r !border-r-border">
+            <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground font-medium !border-r !border-r-border/60">
               Status
             </TableCell>
             {runs.map((run) => {
@@ -300,7 +300,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               <SectionRow label="Parameters" colSpan={totalCols} />
               {paramKeys.map((key) => (
                 <TableRow key={`param-${key}`}>
-                  <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+                  <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground !border-r !border-r-border/60">
                     {key}
                   </TableCell>
                   {runs.map((run) => {
@@ -330,7 +330,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               <SectionRow label="Metrics" colSpan={totalCols} />
               {metricKeys.map((key) => (
                 <TableRow key={`metric-${key}`}>
-                  <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+                  <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground !border-r !border-r-border/60">
                     {key}
                   </TableCell>
                   {runs.map((run) => {
@@ -360,7 +360,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               <SectionRow label="Derived Metrics" colSpan={totalCols} />
               {derivedMetricKeys.map((key) => (
                 <TableRow key={`derived-${key}`}>
-                  <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+                  <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground !border-r !border-r-border/60">
                     {key}
                   </TableCell>
                   {runs.map((run) => {
@@ -387,7 +387,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
           {/* Timing section */}
           <SectionRow label="Timing" colSpan={totalCols} />
           <TableRow>
-            <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+            <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground !border-r !border-r-border/60">
               Duration
             </TableCell>
             {runs.map((run) => {
@@ -416,7 +416,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               {/* Individual artifact rows */}
               {allArtifactNames.map((artifactName) => (
                 <TableRow key={`artifact-${artifactName}`}>
-                  <TableCell className="sticky left-0 z-10 bg-background text-muted-foreground !border-r !border-r-border">
+                  <TableCell className="sticky left-0 z-10 bg-card text-muted-foreground !border-r !border-r-border/60">
                     <span className="truncate max-w-[120px] block" title={artifactName}>
                       {artifactName}
                     </span>

@@ -14,6 +14,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from atlas.capabilities import SupportsRemoteExec, SupportsStorePaths
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import (
     FilterSpec,
@@ -96,6 +97,7 @@ async def export_experiment(
     include_metrics: bool = Query(default=True),
     include_derived: bool = Query(default=True),
     include_record: bool = Query(default=True),
+    include_data: bool = Query(default=True),
 ) -> Response:
     """
     Export experiment results as CSV or Parquet.
@@ -116,6 +118,7 @@ async def export_experiment(
     """
     from atlas.export import (
         build_export_metadata,
+        collect_captured_data_json,
         dataframe_to_csv_bytes,
         dataframe_to_parquet_bytes,
         runs_to_dataframe,
@@ -135,6 +138,13 @@ async def export_experiment(
             detail=f"No runs found for experiment: {experiment_id}",
         )
 
+    captured_data_json = None
+    if include_data:
+        captured_data_json = collect_captured_data_json(
+            store=store,
+            run_ids=[r.record.run_id for r in runs],
+        )
+
     # Convert to DataFrame
     try:
         df = runs_to_dataframe(
@@ -143,6 +153,8 @@ async def export_experiment(
             include_metrics=include_metrics,
             include_derived=include_derived,
             include_record=include_record,
+            include_data=include_data,
+            captured_data_json=captured_data_json,
         )
     except ImportError as e:
         raise HTTPException(
@@ -202,6 +214,9 @@ def _get_experiment_store_path(
     """
     Get the store path for an experiment (with caching).
 
+    Searches for experiment manifests in the experiments/ subdirectory
+    of each store path.
+
     Args:
         experiment_id: The experiment ID to look up.
         store: The store adapter.
@@ -216,56 +231,27 @@ def _get_experiment_store_path(
         if (now - cached_at).total_seconds() < _CACHE_TTL_SECONDS:
             return cached_path
 
-    # Try to find the store path
-    from atlas.store import FileStoreAdapter, MultiStoreAdapter
+    # Use SupportsStorePaths capability if available
+    if isinstance(store, SupportsStorePaths):
+        # Experiment IDs may contain colons, which are replaced with underscores in filenames
+        safe_id = experiment_id.replace(":", "_")
 
-    if isinstance(store, MultiStoreAdapter):
-        # Scan all stores for this experiment
-        for store_path in store.store_paths:
-            manifest_path = Path(store_path) / "manifest.json"
-            if manifest_path.exists():
+        for store_path in store.get_store_paths():
+            experiments_dir = store_path / "experiments"
+            if not experiments_dir.exists():
+                continue
+
+            # Look for any manifest file matching this experiment
+            # Format: {safe_id}_{YYYYMMDD_HHMMSS}.json
+            for manifest_path in experiments_dir.glob(f"{safe_id}_*.json"):
                 try:
                     with open(manifest_path) as f:
                         manifest = json.load(f)
                     if manifest.get("experiment_id") == experiment_id:
-                        _experiment_store_cache[experiment_id] = (store_path, now)
-                        return store_path
+                        _experiment_store_cache[experiment_id] = (str(store_path), now)
+                        return str(store_path)
                 except Exception:
                     pass
-    elif isinstance(store, FileStoreAdapter):
-        store_path = store.store_path
-        manifest_path = Path(store_path) / "manifest.json"
-        if manifest_path.exists():
-            try:
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                if manifest.get("experiment_id") == experiment_id:
-                    _experiment_store_cache[experiment_id] = (store_path, now)
-                    return store_path
-            except Exception:
-                pass
-    else:
-        # Remote store adapter
-        # For remote stores, we need to read the manifest via SFTP
-        # The store adapter should have already synced the manifest
-        if hasattr(store, "store_path") or hasattr(store, "_local_path"):
-            local_path = getattr(store, "_local_path", None) or getattr(
-                store, "store_path", None
-            )
-            if local_path:
-                manifest_path = Path(local_path) / "manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path) as f:
-                            manifest = json.load(f)
-                        if manifest.get("experiment_id") == experiment_id:
-                            _experiment_store_cache[experiment_id] = (
-                                str(local_path),
-                                now,
-                            )
-                            return str(local_path)
-                    except Exception:
-                        pass
 
     return None
 
@@ -333,6 +319,30 @@ def _parse_sacct_output(stdout: str) -> dict[str, int]:
     return counts
 
 
+def _get_latest_manifest_path(store_path: str, experiment_id: str) -> Path | None:
+    """
+    Get the path to the latest manifest for an experiment.
+
+    Args:
+        store_path: Path to the store root.
+        experiment_id: The experiment ID.
+
+    Returns:
+        Path to the latest manifest file, or None if not found.
+    """
+    experiments_dir = Path(store_path) / "experiments"
+    if not experiments_dir.exists():
+        return None
+
+    safe_id = experiment_id.replace(":", "_")
+    manifests = sorted(
+        experiments_dir.glob(f"{safe_id}_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return manifests[0] if manifests else None
+
+
 @router.get("/{experiment_id}/slurm-status", response_model=SlurmArrayStatusResponse)
 async def get_slurm_status(
     experiment_id: str,
@@ -354,36 +364,44 @@ async def get_slurm_status(
         HTTPException 404: If experiment not found or no SLURM manifest.
         HTTPException 500: If SLURM commands fail.
     """
-    # Find the store path for this experiment
-    store_path = _get_experiment_store_path(experiment_id, store)
-    if store_path is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Experiment not found: {experiment_id}",
-        )
-
-    # Read the manifest to get job_ids
-    manifest_path = Path(store_path) / "manifest.json"
-    if not manifest_path.exists():
+    # Get the latest manifest using the store's method (same as manifests endpoint)
+    manifest_response = store.get_experiment_manifest(experiment_id, timestamp=None)
+    if manifest_response is None:
         raise HTTPException(
             status_code=404,
             detail=f"No manifest found for experiment: {experiment_id}",
         )
 
-    try:
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to read manifest: {e}",
-        )
+    # Convert ManifestResponse to dict for compatibility with existing code
+    manifest = {
+        "experiment_id": manifest_response.experiment_id,
+        "submission_mode": (
+            manifest_response.metadata.get("submission_mode")
+            if manifest_response.metadata
+            else None
+        ),
+        "job_ids": (
+            manifest_response.metadata.get("job_ids", [])
+            if manifest_response.metadata
+            else []
+        ),
+        "total_runs": manifest_response.total_runs,
+    }
 
     # Check if this is a SLURM array-indexed submission
+    # Return empty response for non-SLURM experiments (avoids console errors in frontend)
     if manifest.get("submission_mode") != "array_indexed":
-        raise HTTPException(
-            status_code=400,
-            detail="Experiment was not submitted as SLURM array (no scheduler status available)",
+        return SlurmArrayStatusResponse(
+            job_ids=[],
+            total=0,
+            running=0,
+            pending=0,
+            completed=0,
+            failed=0,
+            cancelled=0,
+            timeout=0,
+            oom=0,
+            other=0,
         )
 
     job_ids = manifest.get("job_ids", [])
@@ -404,17 +422,13 @@ async def get_slurm_status(
             other=0,
         )
 
-    # Determine if we need to use SSH for remote execution
-    from atlas.remote import RemoteStoreAdapter
-
-    is_remote = isinstance(store, RemoteStoreAdapter)
-
     # Query squeue
     job_list = ",".join(job_ids)
     squeue_cmd = f"squeue -h -j {job_list} -o '%i %T'"
 
-    if is_remote and hasattr(store, "_conn"):
-        exit_code, stdout, stderr = store._conn.exec_command(squeue_cmd, timeout=30.0)
+    # Use SupportsRemoteExec capability if available, otherwise run locally
+    if isinstance(store, SupportsRemoteExec):
+        exit_code, stdout, stderr = store.exec_remote_command(squeue_cmd, timeout=30.0)
     else:
         exit_code, stdout, stderr = _run_local_slurm_cmd(
             ["squeue", "-h", "-j", job_list, "-o", "%i %T"],
@@ -428,8 +442,8 @@ async def get_slurm_status(
     # Query sacct
     sacct_cmd = f"sacct -n -P -j {job_list} --format=JobIDRaw,State"
 
-    if is_remote and hasattr(store, "_conn"):
-        exit_code, stdout, stderr = store._conn.exec_command(sacct_cmd, timeout=60.0)
+    if isinstance(store, SupportsRemoteExec):
+        exit_code, stdout, stderr = store.exec_remote_command(sacct_cmd, timeout=60.0)
     else:
         exit_code, stdout, stderr = _run_local_slurm_cmd(
             ["sacct", "-n", "-P", "-j", job_list, "--format=JobIDRaw,State"],

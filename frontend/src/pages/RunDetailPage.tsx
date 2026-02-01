@@ -15,6 +15,7 @@ import {
   Loader2,
   Settings,
 } from 'lucide-react';
+import { formatTimestamp } from '@/lib/datetime';
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -40,15 +41,7 @@ export function RunDetailPage() {
   if (isError || !run) {
     return (
       <div className="space-y-6">
-        <PageHeader
-          title={runId || 'Unknown'}
-          breadcrumb={[
-            { label: 'Experiments', href: '/experiments' },
-            { label: 'Runs', href: '/runs' },
-            { label: runId || 'Unknown' },
-          ]}
-          backTo="/runs"
-        />
+        <PageHeader title={runId || 'Unknown'} />
         <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
           <AlertCircle className="h-8 w-8 mb-2" />
           <p className="font-medium">Run not found</p>
@@ -58,34 +51,23 @@ export function RunDetailPage() {
     );
   }
 
-  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleString();
   const formatDuration = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${(ms / 60000).toFixed(1)}m`;
   };
 
-  // Build breadcrumb items
-  const breadcrumbItems = [
-    { label: 'Experiments', href: '/experiments' },
-    {
-      label: experimentDisplayName,
-      href: `/experiments/${encodeURIComponent(experimentId)}`,
-    },
-    {
-      label: 'Runs',
-      href: `/runs?experiment_id=${encodeURIComponent(experimentId)}`,
-    },
-    { label: run.record.run_id.slice(0, 8) + '...' },
-  ];
-
   return (
     <div className="space-y-6">
       <PageHeader
         title={<span className="font-mono">{run.record.run_id}</span>}
-        subtitle={run.record.experiment_id}
-        breadcrumb={breadcrumbItems}
-        backTo={`/runs?experiment_id=${encodeURIComponent(experimentId)}`}
+        subtitle={<span className="font-mono text-xs">{experimentId}</span>}
+        breadcrumb={[
+          { label: 'Experiments', href: '/experiments' },
+          { label: experimentDisplayName, href: `/experiments/${encodeURIComponent(experimentId)}` },
+          { label: 'Runs', href: `/runs?experiment_id=${encodeURIComponent(experimentId)}` },
+          { label: run.record.run_id.slice(0, 8) + '...' },
+        ]}
         actions={<StatusBadge status={run.record.status} />}
       />
 
@@ -101,11 +83,11 @@ export function RunDetailPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <div className="text-sm text-muted-foreground">Started</div>
-              <div>{formatDate(run.record.started_at)}</div>
+              <div>{formatTimestamp(run.record.started_at)}</div>
             </div>
             <div>
               <div className="text-sm text-muted-foreground">Finished</div>
-              <div>{run.record.finished_at ? formatDate(run.record.finished_at) : '—'}</div>
+              <div>{run.record.finished_at ? formatTimestamp(run.record.finished_at) : '—'}</div>
             </div>
             <div>
               <div className="text-sm text-muted-foreground">Duration</div>

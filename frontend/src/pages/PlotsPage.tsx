@@ -1,22 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { PlotBuilder } from '@/components/plots/PlotBuilder';
 import { PageHeader } from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { useAtlasStore } from '@/store/useAtlasStore';
-import { useExperiments, useLatestManifest } from '@/api/hooks';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { Pencil, BarChart3 } from 'lucide-react';
 
 export function PlotsPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const { filter, updateFilter, selectedRunIds, clearSelection } = useAtlasStore();
+  const {
+    filter,
+    updateFilter,
+    selectedRunIds,
+    selectionFilter,
+    hasSelection,
+    getSelectionSummary,
+  } = useAtlasStore();
 
-  const hasRunFilter = selectedRunIds.length > 0;
-
-  // Fetch experiments for the dropdown
-  const { data: experimentsData } = useExperiments();
-  const { data: manifest } = useLatestManifest(filter.experiment_id ?? '');
+  const hasActiveSelection = hasSelection();
+  const selectionSummary = getSelectionSummary();
 
   // Initialize filter from URL params on mount
   useEffect(() => {
@@ -26,85 +28,72 @@ export function PlotsPage() {
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Get display name for current experiment
-  const currentExperimentName = manifest?.name || filter.experiment_id || 'All experiments';
+  // Build the "Edit selection" link URL
+  const editSelectionUrl = useMemo(() => {
+    const params = new URLSearchParams();
 
-  // Build experiment dropdown items
-  const experimentDropdownItems = [
-    { label: 'All experiments', value: '_all', href: '/plots' },
-    ...(experimentsData?.experiments || []).map((exp) => ({
-      label: exp.experiment_id,
-      value: exp.experiment_id,
-      href: `/plots?experiment_id=${encodeURIComponent(exp.experiment_id)}`,
-    })),
-  ];
-
-  // Handle experiment selection from dropdown
-  const handleExperimentSelect = (value: string) => {
-    if (value === '_all') {
-      updateFilter({ experiment_id: null });
-      navigate('/plots');
-    } else {
-      updateFilter({ experiment_id: value });
-      navigate(`/plots?experiment_id=${encodeURIComponent(value)}`);
+    // Use the selection filter's experiment_id if available, otherwise fall back to current filter
+    const experimentId = selectionFilter?.filter.experiment_id ?? filter.experiment_id;
+    if (experimentId) {
+      params.set('experiment_id', experimentId);
     }
-  };
 
-  // Build breadcrumb items
-  const breadcrumbItems = filter.experiment_id
-    ? [
-      { label: 'Experiments', href: '/experiments' },
-      {
-        label: currentExperimentName,
-        href: `/experiments/${encodeURIComponent(filter.experiment_id)}`,
-        dropdown: {
-          items: experimentDropdownItems,
-          selectedValue: filter.experiment_id,
-          onSelect: handleExperimentSelect,
-        },
-      },
-      { label: 'Plots' },
-    ]
-    : [
-      { label: 'Experiments', href: '/experiments' },
-      {
-        label: 'All experiments',
-        dropdown: {
-          items: experimentDropdownItems,
-          selectedValue: '_all',
-          onSelect: handleExperimentSelect,
-        },
-      },
-      { label: 'Plots' },
-    ];
+    // If we have a filter-based selection with field_filters, include them
+    if (selectionFilter?.filter.field_filters && selectionFilter.filter.field_filters.length > 0) {
+      params.set('field_filters', JSON.stringify(selectionFilter.filter.field_filters));
+    }
+
+    return `/runs${params.toString() ? `?${params.toString()}` : ''}`;
+  }, [selectionFilter, filter.experiment_id]);
+
+  // Context: selection summary
+  const contextRow = hasActiveSelection ? (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-muted-foreground">
+        Plotting <span className="font-medium text-foreground">{selectionSummary.count.toLocaleString()}</span> run{selectionSummary.count !== 1 ? 's' : ''}
+        {selectionSummary.type === 'filter' && ' (all matching filter)'}
+      </span>
+    </div>
+  ) : null;
+
+  // Actions: Edit selection link
+  const actionsRow = hasActiveSelection ? (
+    <Link to={editSelectionUrl}>
+      <Button variant="outline" size="sm">
+        <Pencil className="h-3 w-3 mr-2" />
+        Edit selection
+      </Button>
+    </Link>
+  ) : null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Plots"
-        breadcrumb={breadcrumbItems}
-        backTo={filter.experiment_id ? `/experiments/${encodeURIComponent(filter.experiment_id)}` : undefined}
+        context={contextRow}
+        actions={actionsRow}
       />
 
-      {/* Run filter indicator */}
-      {hasRunFilter && (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">
-            Filtered to <span className="font-medium text-foreground">{selectedRunIds.length}</span> selected run{selectedRunIds.length !== 1 ? 's' : ''}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={clearSelection}
-          >
-            <X className="h-3 w-3 mr-1" />
-            Show all
-          </Button>
+      {/* Selection required message */}
+      {!hasActiveSelection ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <BarChart3 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+          <h3 className="text-lg font-medium mb-2">No runs selected</h3>
+          <p className="text-muted-foreground mb-4 max-w-md">
+            Select runs from the Runs page to create plots. You can filter by any field and use "Select All" to include all matching runs.
+          </p>
+          <Link to={filter.experiment_id ? `/runs?experiment_id=${encodeURIComponent(filter.experiment_id)}` : '/runs'}>
+            <Button>
+              Go to Runs
+            </Button>
+          </Link>
         </div>
+      ) : (
+        <PlotBuilder
+          runIds={selectionSummary.type === 'explicit' ? selectedRunIds : undefined}
+          selectionFilter={selectionSummary.type === 'filter' ? selectionFilter?.filter : undefined}
+        />
       )}
-
-      <PlotBuilder runIds={hasRunFilter ? selectedRunIds : undefined} />
     </div>
   );
 }

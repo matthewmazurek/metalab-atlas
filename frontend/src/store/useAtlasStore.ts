@@ -11,11 +11,11 @@ export interface PlotConfig {
   x_field: string;
   y_field: string;
   group_by: string[];
-  agg_fn: AggFn;
-  error_bars: ErrorBarType;
-  reduce_replicates: boolean;
   chart_type: ChartType;
   bin_count: number;
+  agg_fn: AggFn;
+  error_bars: ErrorBarType;
+  aggregate_replicates: boolean;
 }
 
 export interface TableSort {
@@ -30,9 +30,22 @@ export interface ColumnFilter {
   values?: string[];       // For multi-select filter (discrete values)
 }
 
+/**
+ * Selection can be either:
+ * - 'explicit': User manually selected specific runs (stores IDs)
+ * - 'filter': User clicked "Select All" (stores the filter spec + count)
+ * 
+ * Filter-based selection is much more efficient for large result sets
+ * (no need to fetch/store 300k+ IDs).
+ */
+export type RunSelection =
+  | { type: 'explicit'; runIds: string[] }
+  | { type: 'filter'; filter: FilterSpec; count: number };
+
 interface AtlasUIState {
-  // Selection state
-  selectedRunIds: string[];
+  // Selection state - now supports both explicit IDs and filter-based selection
+  selectedRunIds: string[];  // Legacy: kept for explicit selection
+  selectionFilter: { filter: FilterSpec; count: number } | null;  // For "Select All"
   baselineRunId: string | null;
 
   // UI preferences
@@ -54,7 +67,10 @@ interface AtlasUIState {
   // Actions
   setSelectedRunIds: (ids: string[]) => void;
   toggleRunSelection: (id: string) => void;
+  setSelectionFilter: (filter: FilterSpec, count: number) => void;
   clearSelection: () => void;
+  hasSelection: () => boolean;
+  getSelectionSummary: () => { type: 'explicit' | 'filter' | 'none'; count: number };
   setBaselineRunId: (id: string | null) => void;
   setPinnedColumns: (columns: string[]) => void;
   toggleDarkMode: () => void;
@@ -79,6 +95,7 @@ export const useAtlasStore = create<AtlasUIState>()(
     (set, get) => ({
       // Initial state
       selectedRunIds: [],
+      selectionFilter: null,
       baselineRunId: null,
       pinnedColumns: ['record.status', 'record.duration_ms'],
       darkMode: false,
@@ -90,16 +107,44 @@ export const useAtlasStore = create<AtlasUIState>()(
       plotConfig: null,
 
       // Actions
-      setSelectedRunIds: (ids) => set({ selectedRunIds: ids }),
+      // Setting explicit IDs clears any filter-based selection
+      setSelectedRunIds: (ids) => set({ selectedRunIds: ids, selectionFilter: null }),
 
+      // Toggling a run switches to explicit selection mode
       toggleRunSelection: (id) =>
-        set((state) => ({
-          selectedRunIds: state.selectedRunIds.includes(id)
-            ? state.selectedRunIds.filter((x) => x !== id)
-            : [...state.selectedRunIds, id],
-        })),
+        set((state) => {
+          // If we had a filter-based selection, switching to explicit mode starts fresh
+          if (state.selectionFilter) {
+            return { selectedRunIds: [id], selectionFilter: null };
+          }
+          return {
+            selectedRunIds: state.selectedRunIds.includes(id)
+              ? state.selectedRunIds.filter((x) => x !== id)
+              : [...state.selectedRunIds, id],
+          };
+        }),
 
-      clearSelection: () => set({ selectedRunIds: [], baselineRunId: null }),
+      // Set filter-based selection (clears explicit IDs)
+      setSelectionFilter: (filter, count) =>
+        set({ selectionFilter: { filter, count }, selectedRunIds: [] }),
+
+      clearSelection: () => set({ selectedRunIds: [], selectionFilter: null, baselineRunId: null }),
+
+      hasSelection: () => {
+        const state = get();
+        return state.selectedRunIds.length > 0 || state.selectionFilter !== null;
+      },
+
+      getSelectionSummary: () => {
+        const state = get();
+        if (state.selectionFilter) {
+          return { type: 'filter' as const, count: state.selectionFilter.count };
+        }
+        if (state.selectedRunIds.length > 0) {
+          return { type: 'explicit' as const, count: state.selectedRunIds.length };
+        }
+        return { type: 'none' as const, count: 0 };
+      },
 
       setBaselineRunId: (id) => set({ baselineRunId: id }),
 

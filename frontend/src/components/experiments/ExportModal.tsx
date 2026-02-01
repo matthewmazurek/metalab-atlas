@@ -28,6 +28,7 @@ export function ExportModal({ experimentId, open, onOpenChange }: ExportModalPro
   const [includeMetrics, setIncludeMetrics] = useState(true);
   const [includeDerived, setIncludeDerived] = useState(true);
   const [includeRecord, setIncludeRecord] = useState(true);
+  const [includeData, setIncludeData] = useState(true);
 
   const handleExport = () => {
     const url = getExportUrl(experimentId, {
@@ -36,6 +37,7 @@ export function ExportModal({ experimentId, open, onOpenChange }: ExportModalPro
       include_metrics: includeMetrics,
       include_derived: includeDerived,
       include_record: includeRecord,
+      include_data: includeData,
     });
     window.open(url, '_blank');
     onOpenChange(false);
@@ -116,6 +118,13 @@ export function ExportModal({ experimentId, open, onOpenChange }: ExportModalPro
                 onCheckedChange={(checked) => setIncludeDerived(checked === true)}
                 label="Derived metrics"
                 description="derived_* columns"
+              />
+              <CheckboxOption
+                id="include-data"
+                checked={includeData}
+                onCheckedChange={(checked) => setIncludeData(checked === true)}
+                label="Captured data"
+                description="captured_data column (JSON from capture.data())"
               />
             </div>
           </div>

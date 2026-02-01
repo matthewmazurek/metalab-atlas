@@ -5,7 +5,6 @@ export function ExperimentsListPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Experiments" />
-
       <ExperimentTable />
     </div>
   );

@@ -45,13 +45,15 @@ def get_remote_config() -> dict[str, str | None]:
 def get_postgres_config() -> dict[str, str | None]:
     """Get Postgres connection config from environment."""
     return {
-        "artifact_root": os.environ.get("ATLAS_ARTIFACT_ROOT"),
+        "experiments_root": os.environ.get("ATLAS_EXPERIMENTS_ROOT"),
     }
 
 
 def is_remote_url(path: str) -> bool:
     """Check if a path is a remote SSH URL."""
-    return path.startswith("ssh://") or ("@" in path and ":" in path and not path.startswith("postgres"))
+    return path.startswith("ssh://") or (
+        "@" in path and ":" in path and not path.startswith("postgres")
+    )
 
 
 def is_postgres_url(path: str) -> bool:
@@ -84,14 +86,14 @@ def _get_remote_store_singleton(
 @lru_cache(maxsize=1)
 def _get_postgres_store_singleton(
     url: str,
-    artifact_root: str | None,
+    experiments_root: str | None,
 ) -> "PostgresStoreAdapter":
     """Create cached Postgres store adapter instance."""
     from atlas.pg_store import PostgresStoreAdapter
 
     return PostgresStoreAdapter(
         connection_string=url,
-        artifact_root=artifact_root,
+        experiments_root=experiments_root,
     )
 
 
@@ -116,7 +118,7 @@ def get_store() -> StoreAdapter:
         config = get_postgres_config()
         return _get_postgres_store_singleton(
             store_path,
-            config["artifact_root"],
+            config["experiments_root"],
         )
 
     if is_remote_url(store_path):
@@ -145,10 +147,16 @@ def refresh_stores() -> int:
 
     Returns the number of stores discovered.
     """
+    from atlas.capabilities import SupportsRefresh, SupportsStorePaths
+
     store = get_store()
-    if hasattr(store, "refresh_stores"):
-        store.refresh_stores()
-        return len(store.store_paths)
-    if hasattr(store, "refresh"):
+
+    # Refresh if supported
+    if isinstance(store, SupportsRefresh):
         store.refresh()
-    return 1  # Single store adapter or remote
+
+    # Return number of store paths if supported
+    if isinstance(store, SupportsStorePaths):
+        return len(store.get_store_paths())
+
+    return 1  # Single store adapter without SupportsStorePaths

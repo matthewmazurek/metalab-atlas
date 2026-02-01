@@ -10,6 +10,7 @@ import numpy as np
 from fastapi import APIRouter, Depends
 
 from atlas.aggregate import get_field_value
+from atlas.capabilities import SupportsSqlPushdown
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import HistogramRequest, HistogramResponse
 
@@ -37,7 +38,7 @@ async def histogram(
     ```
     """
     # Use SQL pushdown if available (PostgresStoreAdapter)
-    if hasattr(store, "compute_histogram_sql"):
+    if isinstance(store, SupportsSqlPushdown):
         return store.compute_histogram_sql(request)
 
     # Fallback to in-memory histogram

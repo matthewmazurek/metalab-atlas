@@ -110,6 +110,15 @@ class StoreAdapter(Protocol):
         """
         ...
 
+    # Structured results (capture.data)
+    def list_results(self, run_id: str) -> list[str]:
+        """Return list of structured result names for a run."""
+        ...
+
+    def get_result(self, run_id: str, name: str) -> dict[str, Any] | None:
+        """Return a structured result entry for a run."""
+        ...
+
 
 class FileStoreAdapter:
     """
@@ -117,6 +126,10 @@ class FileStoreAdapter:
 
     Uses in-memory caching and filtering. Designed to be replaced
     with an indexed backend for large stores.
+
+    Implements:
+    - SupportsStorePaths: exposes store root path
+    - SupportsRefresh: re-scans store records
     """
 
     # Preview size limits
@@ -132,6 +145,27 @@ class FileStoreAdapter:
         self._store = FileStore(store_path)
         self._cache_time: datetime | None = None
         self._cache_ttl_seconds = 30
+
+    # =========================================================================
+    # Capability: SupportsStorePaths
+    # =========================================================================
+
+    def get_store_paths(self) -> list[Path]:
+        """Return list containing this store's path."""
+        return [self._store_path]
+
+    @property
+    def store_path(self) -> Path:
+        """Return this store's root path (convenience property)."""
+        return self._store_path
+
+    # =========================================================================
+    # Capability: SupportsRefresh
+    # =========================================================================
+
+    def refresh(self) -> None:
+        """Clear cache to force re-scan of store records."""
+        self._cache_time = None
 
     def _get_cached_records(self) -> list[Any]:
         """Get cached run records from metalab store."""
@@ -360,6 +394,22 @@ class FileStoreAdapter:
             return None
         return self._convert_record(record)
 
+    # =========================================================================
+    # Structured results (capture.data)
+    # =========================================================================
+
+    def list_results(self, run_id: str) -> list[str]:
+        """List result names for a run (capture.data)."""
+        if hasattr(self._store, "list_results"):
+            return self._store.list_results(run_id)
+        return []
+
+    def get_result(self, run_id: str, name: str) -> dict[str, Any] | None:
+        """Get structured result data for a run (capture.data)."""
+        if hasattr(self._store, "get_result"):
+            return self._store.get_result(run_id, name)
+        return None
+
     # Record fields to index (discrete categorical fields)
     RECORD_FIELDS_TO_INDEX = ["status", "experiment_id", "seed_fingerprint"]
 
@@ -482,39 +532,50 @@ class FileStoreAdapter:
             max_value=stats.get("max"),
         )
 
+    def _get_artifact_path_from_manifest(
+        self, run_id: str, artifact_name: str
+    ) -> tuple[Path, str] | None:
+        """Look up artifact path and format from the manifest."""
+        manifest_path = self._store_path / "artifacts" / run_id / "_manifest.json"
+        if not manifest_path.exists():
+            return None
+
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            for artifact in manifest.get("artifacts", []):
+                if artifact.get("name") == artifact_name:
+                    uri = artifact.get("uri")
+                    fmt = artifact.get("format", "")
+                    if uri:
+                        path = Path(uri)
+                        if path.exists():
+                            return path, fmt
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
     def get_artifact_content(
         self, run_id: str, artifact_name: str
     ) -> tuple[bytes, str]:
         """Get artifact content by run_id and artifact name."""
-        # Find artifact path
-        artifact_dir = self._store_path / "artifacts" / run_id
+        result = self._get_artifact_path_from_manifest(run_id, artifact_name)
+        if result is None:
+            raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
 
-        # Try common extensions
-        for ext in ["", ".json", ".npz", ".txt", ".png", ".jpg", ".csv"]:
-            path = artifact_dir / f"{artifact_name}{ext}"
-            if path.exists():
-                content = path.read_bytes()
-                content_type, _ = mimetypes.guess_type(str(path))
-                return content, content_type or "application/octet-stream"
-
-        raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
+        path, _ = result
+        content = path.read_bytes()
+        content_type, _ = mimetypes.guess_type(str(path))
+        return content, content_type or "application/octet-stream"
 
     def get_artifact_preview(self, run_id: str, artifact_name: str) -> ArtifactPreview:
         """Get safe artifact preview."""
-        # Find artifact
-        artifact_dir = self._store_path / "artifacts" / run_id
-        artifact_path = None
-        artifact_format = ""
-
-        for ext in ["", ".json", ".npz", ".txt", ".png", ".jpg", ".csv"]:
-            path = artifact_dir / f"{artifact_name}{ext}"
-            if path.exists():
-                artifact_path = path
-                artifact_format = ext.lstrip(".") or "binary"
-                break
-
-        if artifact_path is None:
+        result = self._get_artifact_path_from_manifest(run_id, artifact_name)
+        if result is None:
             raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
+
+        artifact_path, artifact_format = result
+        if not artifact_format:
+            artifact_format = artifact_path.suffix.lstrip(".") or "binary"
 
         size_bytes = artifact_path.stat().st_size
         preview = PreviewData()
@@ -753,6 +814,16 @@ class FileStoreAdapter:
                 datetime.fromisoformat(submitted_at_str) if submitted_at_str else None
             )
 
+            # Build metadata dict, including SLURM-specific fields if present
+            metadata = data.get("metadata", data.get("runtime_hints")) or {}
+            # Include SLURM submission info at top level of manifest
+            if data.get("submission_mode"):
+                metadata["submission_mode"] = data["submission_mode"]
+            if data.get("job_ids"):
+                metadata["job_ids"] = data["job_ids"]
+            if data.get("shards"):
+                metadata["shards"] = data["shards"]
+
             return ManifestResponse(
                 experiment_id=data.get("experiment_id", experiment_id),
                 name=data.get("name"),
@@ -763,9 +834,7 @@ class FileStoreAdapter:
                 params=data.get("params", {}),
                 seeds=data.get("seeds", {}),
                 context_fingerprint=data.get("context_fingerprint"),
-                metadata=data.get(
-                    "metadata", data.get("runtime_hints")
-                ),  # BC: accept old name
+                metadata=metadata if metadata else None,
                 total_runs=data.get("total_runs", 0),
                 run_ids=data.get("run_ids"),
                 submitted_at=submitted_at,
@@ -832,6 +901,10 @@ class MultiStoreAdapter:
 
     Discovers all valid stores in a directory tree and presents
     a unified view of all runs across all stores.
+
+    Implements:
+    - SupportsStorePaths: exposes all discovered store paths
+    - SupportsRefresh: re-discovers stores
     """
 
     def __init__(self, root_path: str | Path, max_depth: int = 2) -> None:
@@ -862,14 +935,30 @@ class MultiStoreAdapter:
         else:
             logger.warning(f"No valid stores found in {self._root_path}")
 
-    def refresh_stores(self) -> None:
-        """Re-discover stores (call if new experiments are added)."""
-        self._discover_stores()
+    # =========================================================================
+    # Capability: SupportsStorePaths
+    # =========================================================================
+
+    def get_store_paths(self) -> list[Path]:
+        """Return list of discovered store paths."""
+        return self._store_paths.copy()
 
     @property
     def store_paths(self) -> list[Path]:
-        """Return list of discovered store paths."""
+        """Return list of discovered store paths (convenience property)."""
         return self._store_paths.copy()
+
+    # =========================================================================
+    # Capability: SupportsRefresh
+    # =========================================================================
+
+    def refresh(self) -> None:
+        """Re-discover stores (call if new experiments are added)."""
+        self._discover_stores()
+
+    def refresh_stores(self) -> None:
+        """Re-discover stores (legacy method, prefer refresh())."""
+        self._discover_stores()
 
     def query_runs(
         self,
@@ -931,6 +1020,28 @@ class MultiStoreAdapter:
             run = adapter.get_run(run_id)
             if run is not None:
                 return run
+        return None
+
+    # =========================================================================
+    # Structured results (capture.data)
+    # =========================================================================
+
+    def list_results(self, run_id: str) -> list[str]:
+        """List result names for a run (from whichever store contains it)."""
+        for adapter in self._adapters:
+            run = adapter.get_run(run_id)
+            if run is None:
+                continue
+            return adapter.list_results(run_id)
+        return []
+
+    def get_result(self, run_id: str, name: str) -> dict[str, Any] | None:
+        """Get a structured result for a run (from whichever store contains it)."""
+        for adapter in self._adapters:
+            run = adapter.get_run(run_id)
+            if run is None:
+                continue
+            return adapter.get_result(run_id, name)
         return None
 
     def get_field_index(self, filter: FilterSpec | None = None) -> FieldIndex:

@@ -1,6 +1,14 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronUp, Copy, CheckCircle2, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 /**
  * Normalized entry for display
@@ -34,7 +42,7 @@ interface KeyValueDisplayProps {
 function getShape(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
-  
+
   if (Array.isArray(value)) {
     // Check if it's a homogeneous array and describe element type
     if (value.length === 0) return 'Array(0)';
@@ -45,7 +53,7 @@ function getShape(value: unknown): string {
     }
     return `Array(${value.length})`;
   }
-  
+
   if (typeof value === 'object') {
     // Check if it's a distribution spec
     if ('type' in value && typeof (value as Record<string, unknown>).type === 'string') {
@@ -54,7 +62,7 @@ function getShape(value: unknown): string {
     const keys = Object.keys(value);
     return `Object(${keys.length})`;
   }
-  
+
   return typeof value;
 }
 
@@ -63,7 +71,7 @@ function getShape(value: unknown): string {
  */
 function formatPreview(value: unknown, maxLength = 60): { preview: string; shape: string; isExpandable: boolean } {
   const shape = getShape(value);
-  
+
   if (value === null || value === undefined) {
     return { preview: '—', shape, isExpandable: false };
   }
@@ -85,7 +93,7 @@ function formatPreview(value: unknown, maxLength = 60): { preview: string; shape
       const preview = formatDistribution(value as Record<string, unknown>);
       return { preview, shape, isExpandable: false };
     }
-    
+
     const keys = Object.keys(value);
     const preview = `{${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ', …' : ''}}`;
     return {
@@ -120,7 +128,7 @@ function formatPrimitive(value: unknown): string {
  */
 function formatDistribution(dist: Record<string, unknown>): string {
   const type = dist.type as string;
-  
+
   switch (type) {
     case 'Uniform':
       return `Uniform(${dist.low}, ${dist.high})`;
@@ -151,33 +159,66 @@ function normalizeEntries(
     if (custom !== null && custom !== undefined) {
       return { key, preview: custom, shape: getShape(value), raw: value, isExpandable: false };
     }
-    
+
     const { preview, shape, isExpandable } = formatPreview(value);
     return { key, preview, shape, raw: value, isExpandable };
   });
 }
 
 /**
+ * Max items to show in expanded view for arrays/objects
+ */
+const MAX_EXPANDED_ITEMS = 50;
+
+/**
  * Copyable row component
  */
 function CopyableRow({ entry }: { entry: DisplayEntry }) {
   const [copied, setCopied] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const handleCopy = async () => {
-    const text = typeof entry.raw === 'object' 
-      ? JSON.stringify(entry.raw, null, 2) 
+    const text = typeof entry.raw === 'object'
+      ? JSON.stringify(entry.raw, null, 2)
       : String(entry.raw);
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const fullValue = useMemo(() => {
-    if (typeof entry.raw === 'object') {
-      return JSON.stringify(entry.raw, null, 2);
+  // For expanded view, truncate large arrays/objects to avoid rendering thousands of items
+  const { displayValue, isTruncated, totalCount } = useMemo(() => {
+    if (Array.isArray(entry.raw)) {
+      const total = entry.raw.length;
+      if (total > MAX_EXPANDED_ITEMS) {
+        const truncated = entry.raw.slice(0, MAX_EXPANDED_ITEMS);
+        return {
+          displayValue: JSON.stringify(truncated, null, 2).slice(0, -1) + ',\n  ...\n]',
+          isTruncated: true,
+          totalCount: total,
+        };
+      }
+      return { displayValue: JSON.stringify(entry.raw, null, 2), isTruncated: false, totalCount: total };
     }
-    return String(entry.raw);
+
+    if (typeof entry.raw === 'object' && entry.raw !== null) {
+      const keys = Object.keys(entry.raw);
+      const total = keys.length;
+      if (total > MAX_EXPANDED_ITEMS) {
+        const truncatedObj: Record<string, unknown> = {};
+        keys.slice(0, MAX_EXPANDED_ITEMS).forEach((k) => {
+          truncatedObj[k] = (entry.raw as Record<string, unknown>)[k];
+        });
+        return {
+          displayValue: JSON.stringify(truncatedObj, null, 2).slice(0, -1) + ',\n  ...\n}',
+          isTruncated: true,
+          totalCount: total,
+        };
+      }
+      return { displayValue: JSON.stringify(entry.raw, null, 2), isTruncated: false, totalCount: total };
+    }
+
+    return { displayValue: String(entry.raw), isTruncated: false, totalCount: 0 };
   }, [entry.raw]);
 
   return (
@@ -190,36 +231,80 @@ function CopyableRow({ entry }: { entry: DisplayEntry }) {
               {entry.shape}
             </span>
           </div>
-          <div 
-            className={cn(
-              "font-mono text-sm",
-              expanded ? "whitespace-pre-wrap break-all" : "truncate"
-            )}
-          >
-            {expanded ? fullValue : entry.preview}
-          </div>
+          {entry.isExpandable ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className={cn(
+                  "w-full text-left font-mono text-sm truncate rounded px-1 -mx-1 transition-colors",
+                  "hover:bg-muted/40 cursor-pointer"
+                )}
+                title="Click to expand"
+              >
+                {entry.preview}
+              </button>
+
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogContent className="sm:max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 min-w-0 pr-10">
+                      <span className="truncate">{entry.key}</span>
+                      <span className="text-xs font-mono text-muted-foreground/80 rounded-md border border-border/50 bg-card/70 px-2 py-0.5">
+                        {entry.shape}
+                      </span>
+                    </DialogTitle>
+                  </DialogHeader>
+
+                  <div className="rounded-lg border border-border/50 bg-card/70">
+                    <pre className="max-h-[60vh] overflow-auto p-3 text-xs font-mono whitespace-pre-wrap break-words text-foreground/90">
+                      {displayValue}
+                    </pre>
+                  </div>
+
+                  {isTruncated && (
+                    <div className="text-xs text-muted-foreground">
+                      Showing {MAX_EXPANDED_ITEMS} of {totalCount} items. Copy for full data.
+                    </div>
+                  )}
+
+                  <DialogFooter className="pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopy}
+                    >
+                      {copied ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4" />
+                          Copy
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </>
+          ) : (
+            <div className="font-mono text-sm truncate">
+              {entry.preview}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          {entry.isExpandable && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="p-0.5 hover:bg-muted rounded"
-              title={expanded ? "Collapse" : "Expand"}
-            >
-              {expanded ? (
-                <ChevronUp className="h-3 w-3 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-              )}
-            </button>
-          )}
           <button
             onClick={handleCopy}
             className="p-0.5 hover:bg-muted rounded"
-            title="Copy to clipboard"
+            title="Copy to clipboard (full data)"
           >
             {copied ? (
-              <CheckCircle2 className="h-3 w-3 text-green-600" />
+              <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
             ) : (
               <Copy className="h-3 w-3 text-muted-foreground" />
             )}
@@ -246,7 +331,7 @@ export function KeyValueDisplay({
   const [filter, setFilter] = useState('');
 
   const entries = useMemo(() => normalizeEntries(data, formatValue), [data, formatValue]);
-  
+
   const filteredEntries = useMemo(() => {
     if (!filter.trim()) return entries;
     const lowerFilter = filter.toLowerCase();
@@ -343,12 +428,12 @@ export function GridSourceDisplay({ spec, totalCases }: { spec: Record<string, u
 /**
  * Specialized display for RandomSource parameters
  */
-export function RandomSourceDisplay({ 
-  space, 
-  nTrials, 
-  seed 
-}: { 
-  space: Record<string, Record<string, unknown>>; 
+export function RandomSourceDisplay({
+  space,
+  nTrials,
+  seed
+}: {
+  space: Record<string, Record<string, unknown>>;
   nTrials?: number;
   seed?: number;
 }) {

@@ -12,20 +12,7 @@ import { PanelTitle, SectionLabel } from '@/components/ui/typography';
 import { useAtlasStore } from '@/store/useAtlasStore';
 import type { FieldInfo } from '@/api/types';
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock } from 'lucide-react';
-
-/**
- * Format a date string as relative time (e.g., "2h ago", "3d ago")
- */
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '—';
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-
-  if (diffHours < 1) return 'just now';
-  if (diffHours < 24) return `${Math.round(diffHours)}h ago`;
-  if (diffHours < 168) return `${Math.round(diffHours / 24)}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
+import { formatRelativeTime } from '@/lib/datetime';
 
 /**
  * Format duration in ms to human readable

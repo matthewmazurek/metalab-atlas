@@ -27,6 +27,32 @@ async def list_artifacts(
     return run.artifacts
 
 
+# NOTE: Preview route must be defined BEFORE the catch-all artifact route
+# to ensure FastAPI matches /preview suffix correctly
+@router.get("/artifacts/{artifact_name}/preview", response_model=ArtifactPreview)
+async def get_artifact_preview(
+    run_id: str,
+    artifact_name: str,
+    store: Annotated[StoreAdapter, Depends(get_store)],
+) -> ArtifactPreview:
+    """
+    Get safe artifact preview.
+
+    Returns metadata and size-limited preview content:
+    - JSON: parsed content (if < 100KB)
+    - NumPy: shape/dtype only (never loads array data)
+    - Text: first 10KB
+    - Images: base64 thumbnail
+    """
+    try:
+        return store.get_artifact_preview(run_id, artifact_name)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact not found: {run_id}/{artifact_name}",
+        )
+
+
 @router.get("/artifacts/{artifact_name}")
 async def get_artifact(
     run_id: str,
@@ -48,30 +74,6 @@ async def get_artifact(
                 "Content-Disposition": f'attachment; filename="{artifact_name}"',
             },
         )
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Artifact not found: {run_id}/{artifact_name}",
-        )
-
-
-@router.get("/artifacts/{artifact_name}/preview", response_model=ArtifactPreview)
-async def get_artifact_preview(
-    run_id: str,
-    artifact_name: str,
-    store: Annotated[StoreAdapter, Depends(get_store)],
-) -> ArtifactPreview:
-    """
-    Get safe artifact preview.
-
-    Returns metadata and size-limited preview content:
-    - JSON: parsed content (if < 100KB)
-    - NumPy: shape/dtype only (never loads array data)
-    - Text: first 10KB
-    - Images: base64 thumbnail
-    """
-    try:
-        return store.get_artifact_preview(run_id, artifact_name)
     except FileNotFoundError:
         raise HTTPException(
             status_code=404,

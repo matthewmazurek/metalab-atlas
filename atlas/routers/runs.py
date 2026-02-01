@@ -28,7 +28,9 @@ def parse_filter_spec(
     status: list[str] | None = Query(default=None),
     started_after: datetime | None = Query(default=None),
     started_before: datetime | None = Query(default=None),
-    field_filters: str | None = Query(default=None, description="JSON-encoded array of FieldFilter objects"),
+    field_filters: str | None = Query(
+        default=None, description="JSON-encoded array of FieldFilter objects"
+    ),
 ) -> FilterSpec:
     """Parse filter parameters from query string."""
     status_list = None
@@ -48,7 +50,9 @@ def parse_filter_spec(
                 )
                 for f in raw_filters
             ]
-        except (json.JSONDecodeError, KeyError, ValueError):
+            print(f"[DEBUG] Parsed field_filters: {parsed_field_filters}")
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"[DEBUG] Failed to parse field_filters: {e}, raw: {field_filters}")
             pass  # Invalid filter format - ignore
 
     return FilterSpec(

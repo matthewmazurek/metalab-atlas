@@ -5,10 +5,10 @@
 // Enums
 export type RunStatus = 'success' | 'failed' | 'cancelled' | 'running';
 export type FilterOp = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains' | 'in';
-export type AggFn = 'mean' | 'median' | 'min' | 'max' | 'count' | 'sum';
-export type ErrorBarType = 'none' | 'std' | 'sem' | 'ci95';
+export type AggFn = 'none' | 'mean' | 'median' | 'min' | 'max' | 'count';
+export type ErrorBarType = 'none' | 'std' | 'sem';
 export type FieldType = 'numeric' | 'string' | 'boolean' | 'unknown';
-export type ChartType = 'scatter' | 'line' | 'bar' | 'heatmap' | 'candlestick' | 'histogram';
+export type ChartType = 'scatter' | 'line' | 'bar' | 'histogram';
 
 // Filter models
 export interface FieldFilter {
@@ -113,46 +113,6 @@ export interface RunListResponse {
   offset: number;
 }
 
-// Aggregation models
-export interface AggregateRequest {
-  filter?: FilterSpec | null;
-  x_field: string;
-  y_field: string;
-  group_by?: string[] | null;
-  replicate_field?: string;
-  reduce_replicates?: boolean;
-  agg_fn?: AggFn;
-  error_bars?: ErrorBarType;
-}
-
-export interface DataPoint {
-  x: number | string | boolean;
-  y: number;
-  y_low?: number | null;
-  y_high?: number | null;
-  n: number;
-  run_ids?: string[] | null;
-  // Quartile fields for distribution visualization
-  y_min?: number | null;
-  y_q1?: number | null;
-  y_median?: number | null;
-  y_q3?: number | null;
-  y_max?: number | null;
-}
-
-export interface Series {
-  name: string;
-  points: DataPoint[];
-}
-
-export interface AggregateResponse {
-  series: Series[];
-  x_field: string;
-  y_field: string;
-  agg_fn: AggFn;
-  total_runs: number;
-}
-
 // Field index models
 export interface FieldInfo {
   type: FieldType;
@@ -219,9 +179,9 @@ export interface ManifestResponse {
 
 // Histogram models
 export interface HistogramRequest {
-  filter?: FilterSpec | null;
   field: string;
   bin_count?: number;
+  filter?: FilterSpec | null;
 }
 
 export interface HistogramResponse {
@@ -230,6 +190,23 @@ export interface HistogramResponse {
   counts: number[];
   total: number;
   run_ids_per_bin?: string[][] | null;
+}
+
+// Field values models (for frontend-driven plotting)
+export interface FieldValuesRequest {
+  filter?: FilterSpec | null;
+  fields: string[];
+  max_points?: number;
+  include_run_ids?: boolean;
+  seed?: number | null;
+}
+
+export interface FieldValuesResponse {
+  fields: Record<string, (number | string | null)[]>;
+  run_ids?: string[] | null;
+  total: number;
+  returned: number;
+  sampled: boolean;
 }
 
 // SLURM status models

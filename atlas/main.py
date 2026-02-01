@@ -12,7 +12,7 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 # Configure logging to show INFO level for atlas modules
@@ -23,17 +23,18 @@ logging.basicConfig(
 # Reduce noise from other libraries
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
 from atlas.routers import (
-    aggregate_router,
     artifacts_router,
     experiments_router,
+    field_values_router,
     histogram_router,
     meta_router,
     runs_router,
 )
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 
 # Path to bundled static files
 STATIC_DIR = Path(__file__).parent / "static"
@@ -150,9 +151,9 @@ app.add_middleware(PrettyJSONMiddleware)
 app.include_router(runs_router)
 app.include_router(artifacts_router)
 app.include_router(meta_router)
-app.include_router(aggregate_router)
-app.include_router(histogram_router)
+app.include_router(field_values_router)
 app.include_router(experiments_router)
+app.include_router(histogram_router)
 
 
 @app.get("/api/health")
@@ -178,6 +179,9 @@ if STATIC_DIR.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
         """Serve the SPA for all non-API routes."""
+        # Don't intercept API routes - let FastAPI handle those
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
         # Check if it's a static file request
         file_path = STATIC_DIR / full_path
         if file_path.is_file():

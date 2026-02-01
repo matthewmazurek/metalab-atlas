@@ -24,7 +24,7 @@ def main():
 @click.option(
     "--store",
     default=None,
-    help="Path to local metalab store directory",
+    help="Path to local metalab store directory or PostgreSQL URL",
     type=click.Path(exists=False),
 )
 @click.option(
@@ -43,6 +43,12 @@ def main():
     default=None,
     help="Local cache directory for remote stores",
     type=click.Path(),
+)
+@click.option(
+    "--experiments-root",
+    default=None,
+    help="Root directory containing experiment subdirectories (for PostgreSQL stores)",
+    type=click.Path(exists=True),
 )
 @click.option(
     "--host",
@@ -65,6 +71,7 @@ def serve(
     remote: str | None,
     ssh_key: str | None,
     cache_dir: str | None,
+    experiments_root: str | None,
     host: str,
     port: int,
     reload: bool,
@@ -76,6 +83,9 @@ def serve(
         # Local store
         metalab-atlas serve --store ./runs
 
+        # PostgreSQL store
+        metalab-atlas serve --store postgresql://user@localhost:5432/metalab
+
         # Remote store via SSH
         metalab-atlas serve --remote user@hpc.cluster.edu:/scratch/runs
 
@@ -83,6 +93,8 @@ def serve(
         metalab-atlas serve --remote ssh://user@host/path --ssh-key ~/.ssh/id_rsa
     """
     import uvicorn
+
+    from atlas.deps import is_postgres_url
 
     # Validate options
     if store and remote:
@@ -119,6 +131,27 @@ def serve(
             click.echo(f"  Cache dir: {cache_dir}")
         else:
             click.echo(f"  Cache dir: (system temp)")
+
+    elif store and is_postgres_url(store):
+        # PostgreSQL store mode
+        os.environ["ATLAS_STORE_PATH"] = store
+
+        if experiments_root:
+            os.environ["ATLAS_EXPERIMENTS_ROOT"] = str(Path(experiments_root).resolve())
+
+        # Parse connection string for display
+        from urllib.parse import urlparse
+
+        parsed = urlparse(store)
+        db_name = parsed.path.lstrip("/") if parsed.path else "metalab"
+        host_port = f"{parsed.hostname or 'localhost'}:{parsed.port or 5432}"
+
+        click.echo(f"  PostgreSQL: {host_port}/{db_name}")
+        click.echo(f"  Mode: postgres")
+        if experiments_root:
+            click.echo(f"  Experiments root: {experiments_root}")
+        else:
+            click.echo(f"  Experiments root: (not set - log/artifact previews disabled)")
 
     else:
         # Local store mode

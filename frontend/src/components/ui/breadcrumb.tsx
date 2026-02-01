@@ -1,27 +1,11 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, ChevronDown } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface BreadcrumbItem {
   label: string;
   href?: string;
-  /** If provided, renders a dropdown instead of a simple link */
-  dropdown?: {
-    items: Array<{
-      label: string;
-      value: string;
-      href?: string;
-    }>;
-    selectedValue?: string;
-    onSelect?: (value: string) => void;
-  };
 }
 
 interface BreadcrumbProps {
@@ -53,52 +37,7 @@ interface BreadcrumbSegmentProps {
 }
 
 function BreadcrumbSegment({ item, isLast }: BreadcrumbSegmentProps) {
-  // Dropdown segment
-  if (item.dropdown) {
-    const selectedItem = item.dropdown.items.find(
-      (i) => i.value === item.dropdown?.selectedValue
-    );
-
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className={cn(
-              'flex items-center gap-1 hover:text-foreground transition-colors',
-              isLast ? 'text-foreground font-medium' : 'text-muted-foreground'
-            )}
-          >
-            <span className="truncate max-w-[200px]">
-              {selectedItem?.label || item.label}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
-          {item.dropdown.items.map((dropdownItem) => (
-            <DropdownMenuItem
-              key={dropdownItem.value}
-              onClick={() => item.dropdown?.onSelect?.(dropdownItem.value)}
-              className={cn(
-                dropdownItem.value === item.dropdown?.selectedValue &&
-                'bg-accent'
-              )}
-            >
-              {dropdownItem.href ? (
-                <Link to={dropdownItem.href} className="w-full">
-                  {dropdownItem.label}
-                </Link>
-              ) : (
-                dropdownItem.label
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    );
-  }
-
-  // Regular link or text segment
+  // Regular link segment (not last item)
   if (item.href && !isLast) {
     return (
       <Link

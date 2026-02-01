@@ -43,23 +43,15 @@ class FilterOp(str, Enum):
 
 
 class AggFn(str, Enum):
-    """Aggregation functions."""
+    """Aggregation functions for plotting."""
 
+    NONE = "none"
     MEAN = "mean"
     MEDIAN = "median"
     MIN = "min"
     MAX = "max"
     COUNT = "count"
     SUM = "sum"
-
-
-class ErrorBarType(str, Enum):
-    """Error bar computation methods."""
-
-    NONE = "none"
-    STD = "std"
-    SEM = "sem"
-    CI95 = "ci95"
 
 
 class FieldType(str, Enum):
@@ -230,107 +222,47 @@ class RunListResponse(BaseModel):
 
 
 # =============================================================================
-# Aggregation Models
+# Field Values Models (for flexible frontend plotting)
 # =============================================================================
 
 
-class AggregateRequest(BaseModel):
-    """Request for aggregated plot data."""
+class FieldValuesRequest(BaseModel):
+    """Request for raw field values (for frontend-driven plotting)."""
 
-    filter: FilterSpec | None = Field(
-        default=None, description="Filter to apply before aggregation"
+    filter: FilterSpec | None = Field(default=None, description="Filter to apply")
+    fields: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=10,
+        description="Fields to retrieve (e.g., ['params.expr_val', 'metrics.score'])",
     )
-    x_field: str = Field(..., description="Field for X axis (e.g., 'params.dim')")
-    y_field: str = Field(..., description="Field for Y axis (e.g., 'metrics.best_f')")
-    group_by: list[str] | None = Field(
-        default=None, description="Fields to group by (e.g., ['params.algorithm'])"
+    max_points: int = Field(
+        default=10000,
+        ge=1,
+        le=50000,
+        description="Maximum points to return (samples if exceeded)",
     )
-
-    # Replicate handling
-    replicate_field: str = Field(
-        default="record.seed_fingerprint",
-        description="Field that identifies replicates",
+    include_run_ids: bool = Field(
+        default=True, description="Include run_ids for click-through functionality"
     )
-    reduce_replicates: bool = Field(
-        default=True,
-        description="Whether to aggregate over replicates",
-    )
-
-    # Aggregation settings
-    agg_fn: AggFn = Field(default=AggFn.MEAN, description="Aggregation function")
-    error_bars: ErrorBarType = Field(
-        default=ErrorBarType.STD, description="Error bar computation method"
+    seed: int | None = Field(
+        default=None,
+        description="Random seed for reproducible sampling (if None, uses default seed 42)",
     )
 
 
-class DataPoint(BaseModel):
-    """A single aggregated data point."""
+class FieldValuesResponse(BaseModel):
+    """Raw field values for frontend plotting."""
 
-    x: float | str | int | bool
-    y: float
-    y_low: float | None = None
-    y_high: float | None = None
-    n: int = Field(..., description="Number of runs aggregated")
+    fields: dict[str, list[float | str | None]] = Field(
+        ..., description="Field values keyed by field name"
+    )
     run_ids: list[str] | None = Field(
-        default=None, description="IDs of runs in this aggregate"
+        default=None, description="Corresponding run IDs (same order as values)"
     )
-
-    # Quartile fields for distribution visualization (candlestick/box plots)
-    y_min: float | None = Field(default=None, description="Minimum Y value")
-    y_q1: float | None = Field(
-        default=None, description="First quartile (25th percentile)"
-    )
-    y_median: float | None = Field(default=None, description="Median (50th percentile)")
-    y_q3: float | None = Field(
-        default=None, description="Third quartile (75th percentile)"
-    )
-    y_max: float | None = Field(default=None, description="Maximum Y value")
-
-
-class Series(BaseModel):
-    """A series of data points for one group."""
-
-    name: str = Field(..., description="Group label (e.g., 'adam')")
-    points: list[DataPoint]
-
-
-class AggregateResponse(BaseModel):
-    """Aggregated plot data response."""
-
-    series: list[Series]
-    x_field: str
-    y_field: str
-    agg_fn: AggFn
-    total_runs: int = Field(..., description="Total runs included in aggregation")
-
-
-# =============================================================================
-# Histogram Models
-# =============================================================================
-
-
-class HistogramRequest(BaseModel):
-    """Request for histogram data."""
-
-    filter: FilterSpec | None = Field(
-        default=None, description="Filter to apply before binning"
-    )
-    field: str = Field(
-        ..., description="Field to compute histogram for (e.g., 'metrics.accuracy')"
-    )
-    bin_count: int = Field(default=20, ge=1, le=100, description="Number of bins")
-
-
-class HistogramResponse(BaseModel):
-    """Histogram data response."""
-
-    field: str
-    bins: list[float] = Field(..., description="Bin edges (n+1 values)")
-    counts: list[int] = Field(..., description="Counts per bin (n values)")
-    total: int = Field(..., description="Total number of values")
-    run_ids_per_bin: list[list[str]] | None = Field(
-        default=None, description="Run IDs falling into each bin (for click-through)"
-    )
+    total: int = Field(..., description="Total matching runs before sampling")
+    returned: int = Field(..., description="Number of points returned")
+    sampled: bool = Field(..., description="Whether data was subsampled")
 
 
 # =============================================================================
@@ -488,3 +420,82 @@ class StatusCounts(BaseModel):
     running: int = Field(default=0, description="Runs with status=running")
     cancelled: int = Field(default=0, description="Runs with status=cancelled")
     total: int = Field(default=0, description="Total runs found in store")
+
+
+# =============================================================================
+# Aggregation / Plot Models
+# =============================================================================
+
+
+class ErrorBarType(str, Enum):
+    """Error bar computation methods."""
+
+    NONE = "none"
+    STD = "std"  # Standard deviation
+    SEM = "sem"  # Standard error of mean
+    CI95 = "ci95"  # 95% confidence interval
+
+
+class DataPoint(BaseModel):
+    """Single data point with optional error bounds and quartiles."""
+
+    x: float | str
+    y: float
+    y_low: float | None = None
+    y_high: float | None = None
+    n: int = Field(default=1, description="Number of values aggregated")
+    run_ids: list[str] = Field(default_factory=list)
+    # Quartile data for box plots
+    y_min: float | None = None
+    y_q1: float | None = None
+    y_median: float | None = None
+    y_q3: float | None = None
+    y_max: float | None = None
+
+
+class Series(BaseModel):
+    """A named series of data points."""
+
+    name: str
+    points: list[DataPoint]
+
+
+class AggregateRequest(BaseModel):
+    """Request for aggregated plot data."""
+
+    x_field: str = Field(..., description="X-axis field (e.g., 'params.dim')")
+    y_field: str = Field(..., description="Y-axis field (e.g., 'metrics.score')")
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Fields to group by for multiple series",
+    )
+    agg_fn: AggFn = Field(default=AggFn.MEAN, description="Aggregation function")
+    error_bars: ErrorBarType = Field(
+        default=ErrorBarType.NONE, description="Error bar type"
+    )
+    filter: FilterSpec | None = Field(default=None, description="Filter to apply")
+
+
+class AggregateResponse(BaseModel):
+    """Aggregated plot data response."""
+
+    series: list[Series]
+    x_field: str
+    y_field: str
+
+
+class HistogramRequest(BaseModel):
+    """Request for histogram computation."""
+
+    field: str = Field(..., description="Field to compute histogram for")
+    bin_count: int = Field(default=20, ge=1, le=100, description="Number of bins")
+    filter: FilterSpec | None = Field(default=None, description="Filter to apply")
+
+
+class HistogramResponse(BaseModel):
+    """Histogram bin data."""
+
+    field: str
+    bins: list[float] = Field(..., description="Bin edges")
+    counts: list[int] = Field(..., description="Counts per bin")
+    total: int = Field(..., description="Total count")

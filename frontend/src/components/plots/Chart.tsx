@@ -1,27 +1,255 @@
 import ReactECharts from 'echarts-for-react';
-import type { AggregateResponse, ChartType, HistogramResponse } from '@/api/types';
+import type { AggFn, ChartType, ErrorBarType, FieldValuesResponse, HistogramResponse } from '@/api/types';
 import { useNavigate } from 'react-router-dom';
 import { useAtlasStore } from '@/store/useAtlasStore';
+import { useMemo } from 'react';
+import { buildHistogramChartOption } from './histogram-utils';
 
 interface ChartProps {
-  data?: AggregateResponse;
-  histogramData?: HistogramResponse;
+  fieldValuesData?: FieldValuesResponse | null;
+  histogramData?: HistogramResponse | null;
   chartType: ChartType;
+  xField?: string;
+  yField?: string;
+  groupByField?: string;
+  aggFn?: AggFn;
+  errorBars?: ErrorBarType;
+  aggregateReplicates?: boolean;
+  experimentId?: string;
 }
 
-export function Chart({ data, histogramData, chartType }: ChartProps) {
+// Aggregation helper functions
+function mean(values: number[]): number {
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function stdDev(values: number[], avg: number): number {
+  if (values.length < 2) return 0;
+  const sqDiffs = values.map(v => (v - avg) ** 2);
+  // Use sample standard deviation (N-1) for unbiased estimate
+  return Math.sqrt(sqDiffs.reduce((a, b) => a + b, 0) / (values.length - 1));
+}
+
+function sem(values: number[], avg: number): number {
+  return stdDev(values, avg) / Math.sqrt(values.length);
+}
+
+interface AggregatedPoint {
+  x: string | number;
+  y: number;
+  yLow?: number;
+  yHigh?: number;
+  n: number;
+  runIds: string[];
+  group?: string;
+}
+
+function getThemeColors(darkMode: boolean) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    // Fallbacks for non-browser environments
+    return {
+      foreground: darkMode ? '#e5e5e5' : '#111827',
+      mutedForeground: darkMode ? '#a3a3a3' : '#6b7280',
+      border: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(17,24,39,0.12)',
+      popover: darkMode ? '#111827' : '#ffffff',
+      chart: darkMode
+        ? ['#7c3aed', '#06b6d4', '#ec4899', '#f59e0b', '#22c55e']
+        : ['#4f46e5', '#0891b2', '#db2777', '#d97706', '#16a34a'],
+    };
+  }
+
+  const style = getComputedStyle(document.documentElement);
+  const get = (name: string) => style.getPropertyValue(name).trim();
+
+  const resolveColor = (value: string, type: 'color' | 'background' = 'color') => {
+    if (!value) return value;
+    try {
+      // Force conversion of oklch/var(...) into a concrete rgb(...) string
+      const el = document.createElement('span');
+      el.style.position = 'absolute';
+      el.style.left = '-99999px';
+      if (type === 'background') el.style.backgroundColor = value;
+      else el.style.color = value;
+      document.body.appendChild(el);
+      const computed = getComputedStyle(el);
+      const resolved = type === 'background' ? computed.backgroundColor : computed.color;
+      el.remove();
+      return resolved || value;
+    } catch {
+      return value;
+    }
+  };
+
+  const foreground = resolveColor(get('--foreground') || (darkMode ? '#e5e5e5' : '#111827'));
+  const mutedForeground = resolveColor(get('--muted-foreground') || (darkMode ? '#a3a3a3' : '#6b7280'));
+  const border = resolveColor(get('--border') || (darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(17,24,39,0.12)'));
+  const popover = resolveColor(get('--popover') || (darkMode ? '#111827' : '#ffffff'), 'background');
+
+  const chart = [
+    get('--chart-1'),
+    get('--chart-2'),
+    get('--chart-3'),
+    get('--chart-4'),
+    get('--chart-5'),
+  ].filter(Boolean).map((c) => resolveColor(c));
+
+  return {
+    foreground,
+    mutedForeground,
+    border,
+    popover,
+    chart: chart.length > 0 ? chart : (darkMode
+      ? ['#7c3aed', '#06b6d4', '#ec4899', '#f59e0b', '#22c55e']
+      : ['#4f46e5', '#0891b2', '#db2777', '#d97706', '#16a34a']),
+  };
+}
+
+// Client-side aggregation
+function aggregateData(
+  xValues: (number | string | null)[],
+  yValues: (number | string | null)[],
+  runIds: string[],
+  groupValues: (number | string | null)[],
+  seedFingerprints: (number | string | null)[],
+  aggFn: AggFn,
+  errorBars: ErrorBarType,
+  groupByField?: string,
+  aggregateReplicates: boolean = true
+): Map<string, AggregatedPoint[]> {
+  // Build raw data points
+  const rawPoints: { x: string | number; y: number; runId: string; group: string; seedFingerprint: string }[] = [];
+
+  for (let i = 0; i < xValues.length; i++) {
+    const x = xValues[i];
+    const yRaw = yValues[i];
+    const y = typeof yRaw === 'string' ? parseFloat(yRaw) : yRaw;
+
+    if (x === null || y === null || isNaN(y)) continue;
+
+    const xVal = typeof x === 'string' ? (isNaN(parseFloat(x)) ? x : parseFloat(x)) : x;
+    const group = groupByField ? String(groupValues[i] ?? 'Other') : 'all';
+    const seedFingerprint = String(seedFingerprints[i] ?? 'unknown');
+
+    rawPoints.push({ x: xVal, y, runId: runIds[i] || '', group, seedFingerprint });
+  }
+
+  // Group by (group, x) when aggregating - aggregates all runs at same position
+  // Group by (group, x, seedFingerprint) when NOT aggregating - shows each seed separately
+  // Use "group by" field to keep different parameter configurations separate if needed
+  const grouped = new Map<string, Map<string, { ys: number[]; runIds: string[] }>>();
+
+  for (const pt of rawPoints) {
+    if (!grouped.has(pt.group)) {
+      grouped.set(pt.group, new Map());
+    }
+    const groupMap = grouped.get(pt.group)!;
+    // Include seedFingerprint only if NOT aggregating replicates
+    const xKey = aggregateReplicates
+      ? String(pt.x)
+      : `${pt.x}|||${pt.seedFingerprint}`;
+
+    if (!groupMap.has(xKey)) {
+      groupMap.set(xKey, { ys: [], runIds: [] });
+    }
+    groupMap.get(xKey)!.ys.push(pt.y);
+    groupMap.get(xKey)!.runIds.push(pt.runId);
+  }
+
+  // Aggregate
+  const result = new Map<string, AggregatedPoint[]>();
+
+  for (const [groupName, xMap] of grouped) {
+    const points: AggregatedPoint[] = [];
+
+    for (const [xKey, { ys, runIds: rids }] of xMap) {
+      // Parse the x value back out (first part before any ||| separator)
+      const xPart = xKey.split('|||')[0];
+      const x: string | number = isNaN(parseFloat(xPart)) ? xPart : parseFloat(xPart);
+
+      let y: number;
+      let yLow: number | undefined;
+      let yHigh: number | undefined;
+
+      switch (aggFn) {
+        case 'mean':
+          y = mean(ys);
+          break;
+        case 'median':
+          y = median(ys);
+          break;
+        case 'min':
+          y = Math.min(...ys);
+          break;
+        case 'max':
+          y = Math.max(...ys);
+          break;
+        case 'count':
+          y = ys.length;
+          break;
+        default:
+          y = mean(ys);
+      }
+
+      // Error bars - only meaningful for mean aggregation with multiple samples
+      // For other aggregations (median, min, max), error bars don't have a clear interpretation
+      if (errorBars !== 'none' && aggFn === 'mean' && ys.length >= 2) {
+        const avg = mean(ys);
+        if (errorBars === 'std') {
+          const sd = stdDev(ys, avg);
+          yLow = y - sd;
+          yHigh = y + sd;
+        } else if (errorBars === 'sem') {
+          const se = sem(ys, avg);
+          yLow = y - se;
+          yHigh = y + se;
+        }
+      }
+
+      points.push({ x, y, yLow, yHigh, n: ys.length, runIds: rids, group: groupName });
+    }
+
+    // Sort by x
+    points.sort((a, b) => {
+      if (typeof a.x === 'number' && typeof b.x === 'number') return a.x - b.x;
+      return String(a.x).localeCompare(String(b.x));
+    });
+
+    result.set(groupName, points);
+  }
+
+  return result;
+}
+
+export function Chart({
+  fieldValuesData,
+  histogramData,
+  chartType,
+  xField,
+  yField,
+  groupByField,
+  aggFn = 'none',
+  errorBars = 'none',
+  aggregateReplicates = true,
+  experimentId,
+}: ChartProps) {
   const navigate = useNavigate();
   const { darkMode } = useAtlasStore();
 
-  // Text colors for dark/light mode
-  const textColor = darkMode ? '#e5e5e5' : '#333';
-  const subtextColor = darkMode ? '#a3a3a3' : '#666';
-  const lineColor = darkMode ? '#404040' : '#ccc';
+  const theme = useMemo(() => getThemeColors(darkMode), [darkMode]);
+  const textColor = theme.foreground;
+  const subtextColor = theme.mutedForeground;
+  const lineColor = theme.border;
 
   // Common tooltip style
   const tooltipStyle = {
-    backgroundColor: darkMode ? '#262626' : '#fff',
-    borderColor: darkMode ? '#404040' : '#ccc',
+    backgroundColor: theme.popover,
+    borderColor: theme.border,
     textStyle: { color: textColor },
   };
 
@@ -33,97 +261,71 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
     splitLine: { lineStyle: { color: lineColor } },
   };
 
+  // Process data with optional aggregation
+  const processedData = useMemo(() => {
+    if (!fieldValuesData || !xField || !yField) return null;
+
+    const xValues = fieldValuesData.fields[xField] || [];
+    const yValues = fieldValuesData.fields[yField] || [];
+    const groupValues = groupByField ? fieldValuesData.fields[groupByField] || [] : [];
+    const seedFingerprints = fieldValuesData.fields['record.seed_fingerprint'] || [];
+    const runIds = fieldValuesData.run_ids || [];
+
+    if (xValues.length === 0 || yValues.length === 0) return null;
+
+    if (aggFn !== 'none') {
+      return aggregateData(xValues, yValues, runIds, groupValues, seedFingerprints, aggFn, errorBars, groupByField, aggregateReplicates);
+    }
+
+    // No aggregation - return raw points grouped
+    const groups = new Map<string, AggregatedPoint[]>();
+
+    for (let i = 0; i < xValues.length; i++) {
+      const x = xValues[i];
+      const yRaw = yValues[i];
+      const y = typeof yRaw === 'string' ? parseFloat(yRaw) : yRaw;
+
+      if (x === null || y === null || isNaN(y as number)) continue;
+
+      const xVal = typeof x === 'string' ? (isNaN(parseFloat(x)) ? x : parseFloat(x)) : x;
+      const group = groupByField ? String(groupValues[i] ?? 'Other') : 'all';
+
+      if (!groups.has(group)) {
+        groups.set(group, []);
+      }
+
+      groups.get(group)!.push({
+        x: xVal,
+        y: y as number,
+        n: 1,
+        runIds: [runIds[i] || ''],
+        group,
+      });
+    }
+
+    return groups;
+  }, [fieldValuesData, xField, yField, groupByField, aggFn, errorBars, aggregateReplicates]);
+
   // Handle histogram chart type
   if (chartType === 'histogram' && histogramData) {
-    const binLabels = histogramData.bins.slice(0, -1).map((b, i) => {
-      const next = histogramData.bins[i + 1];
-      return `${b.toFixed(2)} - ${next.toFixed(2)}`;
+    const option = buildHistogramChartOption({
+      histogramData,
+      darkMode,
+      yField,
+      compact: false,
     });
-
-    // Build data with run_ids for click support
-    const runIdsPerBin = histogramData.run_ids_per_bin || [];
-    const barData = histogramData.counts.map((count, i) => ({
-      value: count,
-      runIds: runIdsPerBin[i] || [],
-    }));
-
-    const option = {
-      tooltip: {
-        ...tooltipStyle,
-        trigger: 'item',
-        formatter: (params: { name: string; data: { value: number; runIds: string[] } }) => {
-          const { name, data } = params;
-          const count = data.value;
-          const runIds = data.runIds || [];
-          let html = `<b>Range</b>: ${name}<br/><b>Count</b>: ${count}`;
-          if (runIds.length > 0) {
-            html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
-          }
-          return html;
-        },
-      },
-      xAxis: {
-        type: 'category',
-        data: binLabels,
-        name: histogramData.field,
-        nameLocation: 'middle',
-        nameGap: 50,
-        ...axisStyle,
-        axisLabel: {
-          ...axisStyle.axisLabel,
-          rotate: 45,
-          interval: 0,
-        },
-      },
-      yAxis: {
-        type: 'value',
-        name: 'Count',
-        nameLocation: 'middle',
-        nameGap: 40,
-        ...axisStyle,
-      },
-      series: [{
-        type: 'bar',
-        data: barData,
-        cursor: 'pointer',
-        itemStyle: {
-          color: darkMode ? '#3b82f6' : '#2563eb',
-        },
-      }],
-      grid: {
-        left: 60,
-        right: 20,
-        bottom: 80,
-        top: 40,
-      },
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleHistogramClick = (params: any) => {
-      const runIds = params?.data?.runIds;
-      if (!runIds || !Array.isArray(runIds) || runIds.length === 0) return;
-
-      if (runIds.length === 1) {
-        navigate(`/runs/${runIds[0]}`);
-      } else {
-        const fieldFilters = [{ field: 'record.run_id', op: 'in', value: runIds }];
-        const filterParam = encodeURIComponent(JSON.stringify(fieldFilters));
-        navigate(`/runs?field_filters=${filterParam}`);
-      }
-    };
 
     return (
       <ReactECharts
         option={option}
         style={{ height: '400px', width: '100%' }}
         notMerge={true}
-        onEvents={{ click: handleHistogramClick }}
       />
     );
   }
 
-  // For other chart types, we need aggregate data
-  if (!data || data.series.length === 0) {
+  // For other chart types, we need processed data
+  if (!processedData || processedData.size === 0) {
     return (
       <div className="flex items-center justify-center h-96 text-muted-foreground">
         No data to display
@@ -132,47 +334,146 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
   }
 
   // Determine if X axis is categorical
-  const isXCategorical = typeof data.series[0]?.points[0]?.x === 'string';
-  const xAxisCategories = isXCategorical
-    ? [...new Set(data.series.flatMap((s) => s.points.map((p) => String(p.x))))]
-    : undefined;
+  const firstGroup = processedData.values().next().value as AggregatedPoint[];
+  const isXCategorical = typeof firstGroup?.[0]?.x === 'string';
+  const allXValues = [...new Set(
+    Array.from(processedData.values())
+      .flat()
+      .map(p => p.x)
+  )];
+  const xCategories = isXCategorical ? allXValues.map(String).sort() : undefined;
 
-  // Build chart option based on type
-  let option: object;
+  // Color palette
+  const colors = theme.chart;
 
-  switch (chartType) {
-    case 'heatmap':
-      option = buildHeatmapOption(data, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle);
-      break;
-    case 'candlestick':
-      option = buildCandlestickOption(data, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle);
-      break;
-    case 'line':
-    case 'bar':
-    case 'scatter':
-    default:
-      option = buildStandardOption(data, chartType, xAxisCategories, textColor, subtextColor, lineColor, darkMode, tooltipStyle, axisStyle, isXCategorical);
-      break;
+  const isAggregated = aggFn !== 'none';
+  const hasErrorBars = isAggregated && errorBars !== 'none';
+
+  // Build series
+  const seriesType = chartType === 'scatter' ? 'scatter' : chartType === 'line' ? 'line' : 'bar';
+  const series: object[] = [];
+  let colorIdx = 0;
+
+  for (const [groupName, points] of processedData) {
+    const color = colors[colorIdx % colors.length];
+    colorIdx++;
+
+    // Main series
+    series.push({
+      name: groupName === 'all' ? (isAggregated ? 'Aggregated' : 'Data') : groupName,
+      type: seriesType,
+      symbolSize: chartType === 'scatter' ? 8 : 4,
+      cursor: 'pointer',
+      itemStyle: { color },
+      data: points.map(p => ({
+        value: isXCategorical && xCategories
+          ? [xCategories.indexOf(String(p.x)), p.y]
+          : [p.x, p.y],
+        runIds: p.runIds,
+        n: p.n,
+      })),
+    });
+
+    // Error bars if aggregated
+    if (hasErrorBars) {
+      const errorData = points
+        .filter(p => p.yLow !== undefined && p.yHigh !== undefined)
+        .map(p => ({
+          value: isXCategorical && xCategories
+            ? [xCategories.indexOf(String(p.x)), p.yLow!, p.yHigh!]
+            : [p.x, p.yLow!, p.yHigh!],
+        }));
+
+      if (errorData.length > 0) {
+        series.push({
+          name: `${groupName} (error)`,
+          type: 'custom',
+          renderItem: createErrorBarRenderer(subtextColor),
+          data: errorData,
+          z: 10,
+          tooltip: { show: false },
+          silent: true,
+        });
+      }
+    }
   }
 
+  const option = {
+    tooltip: {
+      ...tooltipStyle,
+      trigger: 'item',
+      formatter: (params: { data: { value: (number | string)[]; runIds?: string[]; n?: number }; seriesName: string }) => {
+        const { data, seriesName } = params;
+        if (!data?.value || seriesName.includes('(error)')) return '';
+
+        const [x, y] = data.value;
+        const xVal = isXCategorical && xCategories ? xCategories[x as number] : x;
+        const runIds = data.runIds || [];
+        const n = data.n || runIds.length;
+
+        let html = '';
+        if (processedData.size > 1 && !seriesName.includes('Aggregated') && !seriesName.includes('Data')) {
+          html += `<b>${groupByField}</b>: ${seriesName}<br/>`;
+        }
+        html += `<b>${xField}</b>: ${xVal}<br/><b>${yField}</b>: ${typeof y === 'number' ? y.toFixed(4) : y}`;
+
+        // Show run ID for single-run points, otherwise show count
+        if (n === 1 && runIds.length === 1) {
+          const shortId = runIds[0].slice(0, 8);
+          html += `<br/><b>ID</b>: <code style="font-size:11px">${shortId}</code>`;
+        } else if (isAggregated) {
+          html += `<br/><b>Runs</b>: ${n}`;
+        }
+
+        if (runIds.length > 0) {
+          html += `<br/><span style="color:${subtextColor};font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
+        }
+        return html;
+      },
+    },
+    legend: processedData.size > 1 || isAggregated ? {
+      data: Array.from(processedData.keys()).map(k => k === 'all' ? (isAggregated ? 'Aggregated' : 'Data') : k),
+      top: 'top',
+      textStyle: { color: textColor },
+    } : undefined,
+    xAxis: {
+      name: xField,
+      nameLocation: 'middle',
+      nameGap: 30,
+      type: isXCategorical ? 'category' : 'value',
+      data: xCategories,
+      ...axisStyle,
+    },
+    yAxis: {
+      name: isAggregated && aggFn === 'count' ? 'Count' : yField,
+      nameLocation: 'middle',
+      nameGap: 50,
+      type: 'value',
+      ...axisStyle,
+    },
+    series,
+    grid: {
+      left: 60,
+      right: 20,
+      bottom: 50,
+      top: processedData.size > 1 || isAggregated ? 50 : 20,
+    },
+  };
+
+  // Handle click to navigate to run(s)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleClick = (params: any) => {
-    // ECharts passes data in params.data - extract runIds
-    const data = params?.data;
-    if (!data) return;
-
-    // runIds might be directly on data or nested
-    const runIds = data.runIds || data.run_ids;
-    if (!runIds || !Array.isArray(runIds) || runIds.length === 0) return;
+    const runIds = params?.data?.runIds;
+    if (!runIds || runIds.length === 0) return;
 
     if (runIds.length === 1) {
-      // Single run: navigate directly to run details
       navigate(`/runs/${runIds[0]}`);
     } else {
-      // Multiple runs: navigate to runs list filtered by these run IDs
+      // Multiple runs - navigate to filtered list with experiment context
       const fieldFilters = [{ field: 'record.run_id', op: 'in', value: runIds }];
       const filterParam = encodeURIComponent(JSON.stringify(fieldFilters));
-      navigate(`/runs?field_filters=${filterParam}`);
+      const expParam = experimentId ? `experiment_id=${encodeURIComponent(experimentId)}&` : '';
+      navigate(`/runs?${expParam}field_filters=${filterParam}`);
     }
   };
 
@@ -184,316 +485,6 @@ export function Chart({ data, histogramData, chartType }: ChartProps) {
       onEvents={{ click: handleClick }}
     />
   );
-}
-
-// Build standard chart option (scatter, line, bar)
-function buildStandardOption(
-  data: AggregateResponse,
-  chartType: ChartType,
-  xAxisCategories: string[] | undefined,
-  textColor: string,
-  subtextColor: string,
-  _lineColor: string,
-  _darkMode: boolean,
-  tooltipStyle: object,
-  axisStyle: object,
-  isXCategorical: boolean
-) {
-  const seriesType = chartType === 'scatter' ? 'scatter' : chartType === 'line' ? 'line' : 'bar';
-
-  return {
-    tooltip: {
-      ...tooltipStyle,
-      trigger: chartType === 'bar' ? 'axis' : 'item',
-      axisPointer: chartType === 'bar' ? { type: 'shadow' } : undefined,
-      formatter: (params: { data: { value: number[]; runIds?: string[] }; seriesName: string } | { data: { value: number[]; runIds?: string[] }; seriesName: string }[]) => {
-        const p = Array.isArray(params) ? params[0] : params;
-        if (!p?.data?.value) return '';
-        const [x, y] = p.data.value;
-        const runIds = p.data.runIds;
-        const seriesName = p.seriesName;
-        let html = '';
-        // Show group if there are multiple series (group_by is active) and not an error bar series
-        if (data.series.length > 1 && seriesName && !seriesName.includes('(error)')) {
-          html += `<b>Group</b>: ${seriesName}<br/>`;
-        }
-        html += `<b>${data.x_field}</b>: ${x}<br/><b>${data.y_field}</b>: ${typeof y === 'number' ? y.toFixed(4) : y}`;
-        if (runIds && runIds.length > 0) {
-          html += `<br/><b>Runs</b>: ${runIds.length}`;
-          if (runIds.length <= 3) {
-            html += `<br/>${runIds.map((id) => id.slice(0, 8)).join(', ')}`;
-          }
-          html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
-        }
-        return html;
-      },
-    },
-    legend: {
-      data: data.series.map((s) => s.name),
-      top: 'top',
-      textStyle: { color: textColor },
-    },
-    xAxis: {
-      name: data.x_field,
-      nameLocation: 'middle',
-      nameGap: 30,
-      type: isXCategorical ? 'category' : 'value',
-      data: xAxisCategories,
-      ...axisStyle,
-    },
-    yAxis: {
-      name: data.y_field,
-      nameLocation: 'middle',
-      nameGap: 50,
-      type: 'value',
-      ...axisStyle,
-    },
-    series: data.series.flatMap((series) => {
-      const mainSeries = {
-        name: series.name,
-        type: seriesType,
-        symbolSize: chartType === 'scatter' ? 10 : 6,
-        showSymbol: chartType !== 'bar',
-        cursor: 'pointer', // Indicate points are clickable
-        data: series.points.map((p) => ({
-          value: [p.x, p.y],
-          runIds: p.run_ids,
-        })),
-      };
-
-      // Add error bars if present
-      const hasErrorBars = series.points.some((p) => p.y_low !== null && p.y_high !== null);
-      if (hasErrorBars) {
-        const errorData = series.points
-          .filter((p) => p.y_low !== null && p.y_high !== null)
-          .map((p) => ({
-            value: [p.x, p.y_low!, p.y_high!],
-          }));
-
-        return [
-          mainSeries,
-          {
-            name: `${series.name} (error)`,
-            type: 'custom',
-            renderItem: createErrorBarRenderer(subtextColor),
-            data: errorData,
-            z: 10, // Render on top for bar charts
-            tooltip: { show: false }, // Disable tooltip for error bars
-            silent: true, // Don't respond to mouse events
-          },
-        ];
-      }
-
-      return [mainSeries];
-    }),
-  };
-}
-
-// Build heatmap option
-function buildHeatmapOption(
-  data: AggregateResponse,
-  xAxisCategories: string[] | undefined,
-  textColor: string,
-  _subtextColor: string,
-  _lineColor: string,
-  darkMode: boolean,
-  tooltipStyle: object,
-  axisStyle: object
-) {
-  // For heatmap, X axis is the original X, Y axis is the group names, color is the value
-  const groupNames = data.series.map((s) => s.name);
-  const xValues = xAxisCategories || [...new Set(data.series.flatMap((s) => s.points.map((p) => String(p.x))))];
-
-  // Build heatmap data: [xIndex, groupIndex, value]
-  const heatmapData: [number, number, number][] = [];
-  let minVal = Infinity;
-  let maxVal = -Infinity;
-
-  data.series.forEach((series, groupIdx) => {
-    series.points.forEach((p) => {
-      const xIdx = xValues.indexOf(String(p.x));
-      if (xIdx >= 0) {
-        heatmapData.push([xIdx, groupIdx, p.y]);
-        minVal = Math.min(minVal, p.y);
-        maxVal = Math.max(maxVal, p.y);
-      }
-    });
-  });
-
-  return {
-    tooltip: {
-      ...tooltipStyle,
-      formatter: (params: { data: [number, number, number] }) => {
-        const [xIdx, groupIdx, value] = params.data;
-        return `<b>${data.x_field}</b>: ${xValues[xIdx]}<br/><b>Group</b>: ${groupNames[groupIdx]}<br/><b>${data.y_field}</b>: ${value.toFixed(4)}`;
-      },
-    },
-    grid: {
-      left: 100,
-      right: 80,
-      top: 20,
-      bottom: 60,
-    },
-    xAxis: {
-      type: 'category',
-      data: xValues,
-      name: data.x_field,
-      nameLocation: 'middle',
-      nameGap: 40,
-      ...axisStyle,
-    },
-    yAxis: {
-      type: 'category',
-      data: groupNames,
-      name: 'Group',
-      ...axisStyle,
-    },
-    visualMap: {
-      min: minVal,
-      max: maxVal,
-      calculable: true,
-      orient: 'vertical',
-      right: 10,
-      top: 'center',
-      textStyle: { color: textColor },
-      inRange: {
-        color: darkMode
-          ? ['#1e3a5f', '#3b82f6', '#93c5fd']
-          : ['#dbeafe', '#3b82f6', '#1e40af'],
-      },
-    },
-    series: [{
-      type: 'heatmap',
-      data: heatmapData,
-      label: {
-        show: heatmapData.length <= 50,
-        formatter: (params: { data: [number, number, number] }) => params.data[2].toFixed(2),
-        color: textColor,
-      },
-      emphasis: {
-        itemStyle: {
-          shadowBlur: 10,
-          shadowColor: 'rgba(0, 0, 0, 0.5)',
-        },
-      },
-    }],
-  };
-}
-
-// Build candlestick option
-function buildCandlestickOption(
-  data: AggregateResponse,
-  _xAxisCategories: string[] | undefined,
-  textColor: string,
-  _subtextColor: string,
-  _lineColor: string,
-  darkMode: boolean,
-  tooltipStyle: object,
-  axisStyle: object
-) {
-  // Candlestick uses quartile data: [open, close, low, high] = [q1, q3, min, max]
-  // We'll show all series combined or just the first one
-  const series = data.series[0];
-  if (!series) {
-    return {};
-  }
-
-  const xValues = series.points.map((p) => String(p.x));
-  // Use object format to include run_ids for click support
-  const candleData = series.points.map((p) => ({
-    value: [
-      p.y_q1 ?? p.y,
-      p.y_q3 ?? p.y,
-      p.y_min ?? p.y,
-      p.y_max ?? p.y,
-    ],
-    runIds: p.run_ids,
-  }));
-
-  // Also show median as a line with run_ids
-  const medianData = series.points.map((p) => ({
-    value: p.y_median ?? p.y,
-    runIds: p.run_ids,
-  }));
-
-  return {
-    tooltip: {
-      ...tooltipStyle,
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      formatter: (params: { dataIndex: number }[]) => {
-        const idx = params[0]?.dataIndex;
-        if (idx === undefined) return '';
-        const p = series.points[idx];
-        const runIds = p.run_ids || [];
-        let html = '';
-        // Show group if there are multiple series
-        if (data.series.length > 1) {
-          html += `<b>Group</b>: ${series.name}<br/>`;
-        }
-        html += `<b>${data.x_field}</b>: ${p.x}<br/>
-                <b>Max</b>: ${p.y_max?.toFixed(4) ?? '-'}<br/>
-                <b>Q3</b>: ${p.y_q3?.toFixed(4) ?? '-'}<br/>
-                <b>Median</b>: ${p.y_median?.toFixed(4) ?? '-'}<br/>
-                <b>Q1</b>: ${p.y_q1?.toFixed(4) ?? '-'}<br/>
-                <b>Min</b>: ${p.y_min?.toFixed(4) ?? '-'}<br/>
-                <b>Runs</b>: ${p.n}`;
-        if (runIds.length > 0) {
-          html += `<br/><span style="color:#888;font-size:11px">Click to view ${runIds.length === 1 ? 'run' : 'runs'}</span>`;
-        }
-        return html;
-      },
-    },
-    legend: {
-      data: [series.name, 'Median'],
-      top: 'top',
-      textStyle: { color: textColor },
-    },
-    xAxis: {
-      type: 'category',
-      data: xValues,
-      name: data.x_field,
-      nameLocation: 'middle',
-      nameGap: 30,
-      ...axisStyle,
-    },
-    yAxis: {
-      name: data.y_field,
-      nameLocation: 'middle',
-      nameGap: 50,
-      type: 'value',
-      ...axisStyle,
-    },
-    series: [
-      {
-        name: series.name,
-        type: 'candlestick',
-        data: candleData,
-        cursor: 'pointer',
-        itemStyle: {
-          color: darkMode ? '#22c55e' : '#16a34a',
-          color0: darkMode ? '#ef4444' : '#dc2626',
-          borderColor: darkMode ? '#22c55e' : '#16a34a',
-          borderColor0: darkMode ? '#ef4444' : '#dc2626',
-        },
-      },
-      {
-        name: 'Median',
-        type: 'line',
-        data: medianData,
-        cursor: 'pointer',
-        symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: {
-          color: darkMode ? '#f59e0b' : '#d97706',
-          width: 2,
-        },
-        itemStyle: {
-          color: darkMode ? '#f59e0b' : '#d97706',
-        },
-      },
-    ],
-  };
 }
 
 // Create error bar renderer function
