@@ -45,9 +45,9 @@ def main():
     type=click.Path(),
 )
 @click.option(
-    "--experiments-root",
+    "--file-root",
     default=None,
-    help="Root directory containing experiment subdirectories (for PostgreSQL stores)",
+    help="Root directory for files (logs, artifacts) when using PostgreSQL stores",
     type=click.Path(exists=True),
 )
 @click.option(
@@ -71,7 +71,7 @@ def serve(
     remote: str | None,
     ssh_key: str | None,
     cache_dir: str | None,
-    experiments_root: str | None,
+    file_root: str | None,
     host: str,
     port: int,
     reload: bool,
@@ -136,8 +136,8 @@ def serve(
         # PostgreSQL store mode
         os.environ["ATLAS_STORE_PATH"] = store
 
-        if experiments_root:
-            os.environ["ATLAS_EXPERIMENTS_ROOT"] = str(Path(experiments_root).resolve())
+        if file_root:
+            os.environ["ATLAS_FILE_ROOT"] = str(Path(file_root).resolve())
 
         # Parse connection string for display
         from urllib.parse import urlparse
@@ -148,10 +148,10 @@ def serve(
 
         click.echo(f"  PostgreSQL: {host_port}/{db_name}")
         click.echo(f"  Mode: postgres")
-        if experiments_root:
-            click.echo(f"  Experiments root: {experiments_root}")
+        if file_root:
+            click.echo(f"  File root: {file_root}")
         else:
-            click.echo(f"  Experiments root: (not set - log/artifact previews disabled)")
+            click.echo(f"  File root: (not set - log/artifact previews disabled)")
 
     else:
         # Local store mode

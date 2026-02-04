@@ -24,6 +24,7 @@ from atlas.models import (
     SlurmArrayStatusResponse,
     StatusCounts,
 )
+from metalab.store.layout import safe_experiment_id
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ async def export_experiment(
 
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_experiment_id = experiment_id.replace(":", "_").replace("/", "_")
+    safe_exp_id = safe_experiment_id(experiment_id).replace("/", "_")
 
     if format == "parquet":
         # Get context fingerprint from manifest if available
@@ -185,12 +186,12 @@ async def export_experiment(
                 detail=f"Parquet export requires pyarrow: {e}",
             )
 
-        filename = f"{safe_experiment_id}_{timestamp}.parquet"
+        filename = f"{safe_exp_id}_{timestamp}.parquet"
         media_type = "application/octet-stream"
     else:
         # CSV export
         content = dataframe_to_csv_bytes(df)
-        filename = f"{safe_experiment_id}_{timestamp}.csv"
+        filename = f"{safe_exp_id}_{timestamp}.csv"
         media_type = "text/csv"
 
     return Response(
@@ -234,7 +235,7 @@ def _get_experiment_store_path(
     # Use SupportsStorePaths capability if available
     if isinstance(store, SupportsStorePaths):
         # Experiment IDs may contain colons, which are replaced with underscores in filenames
-        safe_id = experiment_id.replace(":", "_")
+        safe_id = safe_experiment_id(experiment_id)
 
         for store_path in store.get_store_paths():
             experiments_dir = store_path / "experiments"
@@ -334,7 +335,7 @@ def _get_latest_manifest_path(store_path: str, experiment_id: str) -> Path | Non
     if not experiments_dir.exists():
         return None
 
-    safe_id = experiment_id.replace(":", "_")
+    safe_id = safe_experiment_id(experiment_id)
     manifests = sorted(
         experiments_dir.glob(f"{safe_id}_*.json"),
         key=lambda p: p.stat().st_mtime,

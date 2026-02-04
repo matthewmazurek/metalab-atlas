@@ -116,11 +116,11 @@ export function useLogsList(runId: string, isRunning = false) {
   });
 }
 
-export function useFields(experimentId?: string) {
+export function useFields(experimentId?: string, isInProgress = false) {
   return useQuery({
     queryKey: queryKeys.fields(experimentId),
     queryFn: () => fetchFields(experimentId),
-    refetchInterval: REFETCH_INTERVAL,
+    refetchInterval: isInProgress ? ACTIVE_REFETCH_INTERVAL : REFETCH_INTERVAL,
   });
 }
 
@@ -146,7 +146,7 @@ export function useFieldValues(request: FieldValuesRequest, enabled = true) {
   });
 }
 
-export function useHistogram(request: HistogramRequest | null, enabled = true) {
+export function useHistogram(request: HistogramRequest | null, enabled = true, isInProgress = false) {
   // Serialize filter for stable query key
   const filterKey = request?.filter ? JSON.stringify(request.filter) : 'none';
 
@@ -154,9 +154,10 @@ export function useHistogram(request: HistogramRequest | null, enabled = true) {
     queryKey: ['histogram', request?.field, request?.bin_count, filterKey],
     queryFn: () => fetchHistogram(request!),
     enabled: enabled && !!request?.field,
-    // Histograms don't need auto-refresh - keep data stable
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
+    // Refresh faster when experiment is in progress, otherwise keep stable
+    staleTime: isInProgress ? 0 : Infinity,
+    refetchInterval: isInProgress ? ACTIVE_REFETCH_INTERVAL : false,
+    refetchOnWindowFocus: isInProgress,
   });
 }
 
@@ -193,6 +194,8 @@ export function useStatusCounts(experimentId: string) {
     queryKey: queryKeys.statusCounts(experimentId),
     queryFn: () => fetchStatusCounts(experimentId),
     enabled: !!experimentId,
-    refetchInterval: REFETCH_INTERVAL,
+    // Auto-poll faster when experiment has running runs
+    refetchInterval: (query) =>
+      (query.state.data?.running ?? 0) > 0 ? ACTIVE_REFETCH_INTERVAL : REFETCH_INTERVAL,
   });
 }

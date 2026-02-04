@@ -45,7 +45,7 @@ def get_remote_config() -> dict[str, str | None]:
 def get_postgres_config() -> dict[str, str | None]:
     """Get Postgres connection config from environment."""
     return {
-        "experiments_root": os.environ.get("ATLAS_EXPERIMENTS_ROOT"),
+        "file_root": os.environ.get("ATLAS_FILE_ROOT"),
     }
 
 
@@ -86,14 +86,14 @@ def _get_remote_store_singleton(
 @lru_cache(maxsize=1)
 def _get_postgres_store_singleton(
     url: str,
-    experiments_root: str | None,
+    file_root: str | None,
 ) -> "PostgresStoreAdapter":
     """Create cached Postgres store adapter instance."""
     from atlas.pg_store import PostgresStoreAdapter
 
     return PostgresStoreAdapter(
         connection_string=url,
-        experiments_root=experiments_root,
+        file_root=file_root,
     )
 
 
@@ -118,7 +118,7 @@ def get_store() -> StoreAdapter:
         config = get_postgres_config()
         return _get_postgres_store_singleton(
             store_path,
-            config["experiments_root"],
+            config["file_root"],
         )
 
     if is_remote_url(store_path):

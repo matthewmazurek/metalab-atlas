@@ -44,6 +44,7 @@ from atlas.models import (
     RunStatus,
     StatusCounts,
 )
+from metalab.store.layout import safe_experiment_id
 
 if TYPE_CHECKING:
     import psycopg  # type: ignore[import-not-found]
@@ -148,16 +149,8 @@ def _parse_postgres_url(url: str) -> dict[str, Any]:
         "password": parsed.password,
         "dbname": parsed.path.lstrip("/") if parsed.path else "metalab",
         "schema": params.get("schema", "public"),
-        "experiments_root": params.get("experiments_root"),
+        "file_root": params.get("file_root"),
     }
-
-
-def _safe_experiment_id(experiment_id: str) -> str:
-    """Sanitize experiment_id for use as directory name.
-
-    'my_exp:1.0' -> 'my_exp_1.0'
-    """
-    return experiment_id.replace(":", "_")
 
 
 class PostgresStoreAdapter:
@@ -173,7 +166,7 @@ class PostgresStoreAdapter:
         connection_string: str,
         *,
         connect_timeout: float = 10.0,
-        experiments_root: str | None = None,
+        file_root: str | None = None,
     ) -> None:
         """
         Initialize with Postgres connection.
@@ -181,7 +174,7 @@ class PostgresStoreAdapter:
         Args:
             connection_string: PostgreSQL connection URL.
             connect_timeout: Connection timeout in seconds.
-            experiments_root: Root directory containing experiment subdirectories.
+            file_root: Root directory for files (logs, artifacts).
         """
         try:
             import psycopg  # type: ignore[import-not-found]
@@ -197,7 +190,7 @@ class PostgresStoreAdapter:
         # Parse URL for config
         config = _parse_postgres_url(connection_string)
         self._schema = config["schema"]
-        self._experiments_root = experiments_root or config.get("experiments_root")
+        self._file_root = file_root or config.get("file_root")
 
         # Connection pool (lazy)
         self._pool: psycopg.ConnectionPool | None = None
@@ -1140,10 +1133,10 @@ class PostgresStoreAdapter:
         if path.is_absolute():
             return path if path.exists() else None
 
-        # Relative path: {experiments_root}/{safe_exp_id}/{uri}
-        if self._experiments_root and experiment_id:
-            safe_id = _safe_experiment_id(experiment_id)
-            resolved = Path(self._experiments_root) / safe_id / uri
+        # Relative path: {file_root}/{safe_exp_id}/{uri}
+        if self._file_root and experiment_id:
+            safe_id = safe_experiment_id(experiment_id)
+            resolved = Path(self._file_root) / safe_id / uri
             return resolved if resolved.exists() else None
 
         return None
@@ -1289,18 +1282,18 @@ class PostgresStoreAdapter:
         on the filesystem via FileStore. Database storage is legacy/fallback.
 
         Searches in order:
-        1. Experiment subdirectory: {experiments_root}/{safe_exp_id}/logs/
-        2. Flat structure (legacy): {experiments_root}/logs/
+        1. Experiment subdirectory: {file_root}/{safe_exp_id}/logs/
+        2. Flat structure (legacy): {file_root}/logs/
         3. Database (legacy)
         """
         # Primary: filesystem (new architecture with FileStore composition)
-        if self._experiments_root:
-            exp_root = Path(self._experiments_root)
+        if self._file_root:
+            exp_root = Path(self._file_root)
 
             # Try experiment subdirectory first
             experiment_id = self._get_experiment_id_for_run(run_id)
             if experiment_id:
-                safe_id = _safe_experiment_id(experiment_id)
+                safe_id = safe_experiment_id(experiment_id)
                 log_path = exp_root / safe_id / "logs" / f"{run_id}_{log_name}.log"
                 if log_path.exists():
                     return log_path.read_text()
@@ -1338,20 +1331,20 @@ class PostgresStoreAdapter:
         Scans both filesystem (new architecture) and database (legacy).
 
         Searches in order:
-        1. Experiment subdirectory: {experiments_root}/{safe_exp_id}/logs/
-        2. Flat structure (legacy): {experiments_root}/logs/
+        1. Experiment subdirectory: {file_root}/{safe_exp_id}/logs/
+        2. Flat structure (legacy): {file_root}/logs/
         3. Database (legacy)
         """
         log_names: set[str] = set()
 
         # Primary: filesystem (new architecture with FileStore composition)
-        if self._experiments_root:
-            exp_root = Path(self._experiments_root)
+        if self._file_root:
+            exp_root = Path(self._file_root)
 
             # Try experiment subdirectory first
             experiment_id = self._get_experiment_id_for_run(run_id)
             if experiment_id:
-                safe_id = _safe_experiment_id(experiment_id)
+                safe_id = safe_experiment_id(experiment_id)
                 log_dir = exp_root / safe_id / "logs"
                 if log_dir.exists():
                     for log_file in log_dir.glob(f"{run_id}_*.log"):
@@ -1428,10 +1421,18 @@ class PostgresStoreAdapter:
                     return None
 
                 return {
-                    "data": row[0] if isinstance(row[0], (dict, list)) else json.loads(row[0]),
+                    "data": (
+                        row[0]
+                        if isinstance(row[0], (dict, list))
+                        else json.loads(row[0])
+                    ),
                     "dtype": row[1],
                     "shape": list(row[2]) if row[2] else None,
-                    "metadata": row[3] if isinstance(row[3], dict) else json.loads(row[3] or "{}"),
+                    "metadata": (
+                        row[3]
+                        if isinstance(row[3], dict)
+                        else json.loads(row[3] or "{}")
+                    ),
                 }
 
     def list_results(self, run_id: str) -> list[str]:

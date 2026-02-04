@@ -168,6 +168,7 @@ export function ExperimentDetailPage() {
   const isComplete = expectedTotal != null && completedRuns >= expectedTotal;
   const hasFailures = failedCount > 0;
   const isAllSuccess = isComplete && !hasFailures;
+  const isInProgress = runningCount > 0;
 
   // Progress percentages (for visual bar)
   const totalForPercent = expectedTotal ?? completedRuns;
@@ -291,23 +292,39 @@ export function ExperimentDetailPage() {
             {expectedTotal != null && expectedTotal > 0 && (
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden flex">
-                  {successPercent > 0 && (
+                  {/* Filled progress segments with shimmer overlay */}
+                  {(successPercent > 0 || failedPercent > 0 || runningPercent > 0) && (
                     <div
-                      className="h-full bg-emerald-500 dark:bg-emerald-400"
-                      style={{ width: `${successPercent}%` }}
-                    />
-                  )}
-                  {failedPercent > 0 && (
-                    <div
-                      className="h-full bg-rose-500 dark:bg-rose-400"
-                      style={{ width: `${failedPercent}%` }}
-                    />
-                  )}
-                  {runningPercent > 0 && (
-                    <div
-                      className="h-full bg-cyan-500 dark:bg-cyan-400"
-                      style={{ width: `${runningPercent}%` }}
-                    />
+                      className="relative h-full flex overflow-hidden"
+                      style={{ width: `${successPercent + failedPercent + runningPercent}%` }}
+                    >
+                      {successPercent > 0 && (
+                        <div
+                          className="h-full bg-emerald-500 dark:bg-emerald-400"
+                          style={{ width: `${(successPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
+                        />
+                      )}
+                      {failedPercent > 0 && (
+                        <div
+                          className="h-full bg-rose-500 dark:bg-rose-400"
+                          style={{ width: `${(failedPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
+                        />
+                      )}
+                      {runningPercent > 0 && (
+                        <div
+                          className="h-full bg-cyan-500 dark:bg-cyan-400"
+                          style={{ width: `${(runningPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
+                        />
+                      )}
+                      {/* Animated shimmer overlay for in-progress experiments */}
+                      {isInProgress && (
+                        <div className="absolute inset-0 overflow-hidden">
+                          <div
+                            className="progress-shimmer absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                          />
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
                 <span className="text-sm tabular-nums text-muted-foreground w-12 text-right">
@@ -545,11 +562,13 @@ export function ExperimentDetailPage() {
               experimentId={decodedExperimentId}
               selectedField={selectedMetricField}
               onFieldSelect={setSelectedMetricField}
+              isInProgress={isInProgress}
             />
             <DistributionCard
               experimentId={decodedExperimentId}
               selectedField={selectedMetricField}
               onFieldChange={setSelectedMetricField}
+              isInProgress={isInProgress}
             />
           </div>
         </div>

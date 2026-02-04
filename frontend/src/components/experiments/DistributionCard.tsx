@@ -19,16 +19,19 @@ interface DistributionCardProps {
   experimentId: string;
   selectedField?: string;
   onFieldChange?: (field: string) => void;
+  /** When true, polls data more frequently (for in-progress experiments) */
+  isInProgress?: boolean;
 }
 
 export function DistributionCard({
   experimentId,
   selectedField: controlledField,
   onFieldChange,
+  isInProgress = false,
 }: DistributionCardProps) {
   const navigate = useNavigate();
   const { darkMode, setSelectionFilter, setPlotConfig } = useAtlasStore();
-  const { data: fieldsData, isLoading: fieldsLoading } = useFields(experimentId);
+  const { data: fieldsData, isLoading: fieldsLoading } = useFields(experimentId, isInProgress);
   const [internalField, setInternalField] = useState<string>('');
 
   // Use controlled or internal state
@@ -101,7 +104,8 @@ export function DistributionCard({
 
   const { data: histogramData, isLoading: histogramLoading } = useHistogram(
     histogramRequest,
-    !!effectiveField
+    !!effectiveField,
+    isInProgress
   );
 
   // Build chart option using shared utility

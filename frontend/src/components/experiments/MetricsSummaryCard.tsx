@@ -17,6 +17,8 @@ interface MetricsSummaryCardProps {
   experimentId: string;
   selectedField?: string;
   onFieldSelect?: (field: string) => void;
+  /** When true, polls data more frequently (for in-progress experiments) */
+  isInProgress?: boolean;
 }
 
 /**
@@ -139,8 +141,9 @@ export function MetricsSummaryCard({
   experimentId,
   selectedField,
   onFieldSelect,
+  isInProgress = false,
 }: MetricsSummaryCardProps) {
-  const { data: fieldsData, isLoading, error } = useFields(experimentId);
+  const { data: fieldsData, isLoading, error } = useFields(experimentId, isInProgress);
 
   if (isLoading) {
     return (

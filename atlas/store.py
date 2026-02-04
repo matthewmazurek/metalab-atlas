@@ -43,6 +43,7 @@ from atlas.models import (
     Series,
     StatusCounts,
 )
+from metalab.store.layout import safe_experiment_id
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +140,11 @@ class FileStoreAdapter:
 
     def __init__(self, store_path: str | Path) -> None:
         """Initialize with path to metalab store."""
-        from metalab.store.file import FileStore
+        from metalab.store.file import FileStoreConfig
 
         self._store_path = Path(store_path)
-        self._store = FileStore(store_path)
+        self._config = FileStoreConfig(root=str(store_path))
+        self._store = self._config.connect()
         self._cache_time: datetime | None = None
         self._cache_ttl_seconds = 30
 
@@ -676,11 +678,22 @@ class FileStoreAdapter:
                 latest = record.started_at
             experiments[exp_id] = (count, latest)
 
-        # If no experiments found from runs, include the store itself
-        # using its directory name as the experiment ID
+        # If no experiments found from runs, try to get experiment_id from _meta.json
+        # (scoped stores now store their experiment_id in the meta file)
         if not experiments:
-            store_name = self._store_path.name
-            experiments[store_name] = (0, None)
+            meta_path = self._store_path / "_meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text())
+                    if "experiment_id" in meta:
+                        experiments[meta["experiment_id"]] = (0, None)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Final fallback: use directory name
+            if not experiments:
+                store_name = self._store_path.name
+                experiments[store_name] = (0, None)
 
         return [
             (exp_id, count, latest) for exp_id, (count, latest) in experiments.items()
@@ -736,7 +749,7 @@ class FileStoreAdapter:
 
         # Manifest files are named: {experiment_id}_{timestamp}.json
         # The experiment_id may contain colons which are replaced with underscores
-        safe_id = experiment_id.replace(":", "_")
+        safe_id = safe_experiment_id(experiment_id)
         manifests = []
 
         for path in experiments_dir.glob(f"{safe_id}_*.json"):
@@ -780,7 +793,7 @@ class FileStoreAdapter:
         if not experiments_dir.exists():
             return None
 
-        safe_id = experiment_id.replace(":", "_")
+        safe_id = safe_experiment_id(experiment_id)
 
         if timestamp is None:
             # Get the latest manifest
@@ -852,6 +865,28 @@ def is_valid_store(path: Path) -> bool:
     """
     meta_file = path / "_meta.json"
     return meta_file.exists()
+
+
+def list_collection_experiments(root: Path) -> list[str]:
+    """
+    List experiment IDs in a collection using the metalab collection API.
+
+    This leverages FileStoreConfig.list_experiments() which reads experiment_id
+    from each store's _meta.json file.
+
+    Args:
+        root: Path to a collection root (unscoped store directory)
+
+    Returns:
+        List of experiment IDs found in the collection
+    """
+    from metalab.store.file import FileStoreConfig
+
+    try:
+        config = FileStoreConfig(root=str(root))
+        return config.list_experiments()
+    except Exception:
+        return []
 
 
 def discover_stores(root: Path, max_depth: int = 2) -> list[Path]:
