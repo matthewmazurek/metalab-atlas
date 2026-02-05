@@ -1276,110 +1276,50 @@ class PostgresStoreAdapter:
         )
 
     def get_log(self, run_id: str, log_name: str) -> str | None:
-        """Get log content from filesystem or database.
+        """Get log content from filesystem.
 
-        With the new PostgresStore composition architecture, logs are stored
-        on the filesystem via FileStore. Database storage is legacy/fallback.
-
-        Searches in order:
-        1. Experiment subdirectory: {file_root}/{safe_exp_id}/logs/
-        2. Flat structure (legacy): {file_root}/logs/
-        3. Database (legacy)
+        Logs are stored on the filesystem via FileStore composition.
+        Path: {file_root}/{safe_exp_id}/logs/{run_id}_{log_name}.log
         """
-        # Primary: filesystem (new architecture with FileStore composition)
-        if self._file_root:
-            exp_root = Path(self._file_root)
-
-            # Try experiment subdirectory first
-            experiment_id = self._get_experiment_id_for_run(run_id)
-            if experiment_id:
-                safe_id = safe_experiment_id(experiment_id)
-                log_path = exp_root / safe_id / "logs" / f"{run_id}_{log_name}.log"
-                if log_path.exists():
-                    return log_path.read_text()
-
-            # Fallback: flat structure (legacy)
-            log_path = exp_root / "logs" / f"{run_id}_{log_name}.log"
-            if log_path.exists():
-                return log_path.read_text()
-
-        # Fallback: database (legacy storage)
-        scope = self._scope_for_run(run_id)
-        schema = scope.single_schema()
-        if not schema:
+        if not self._file_root:
             return None
 
-        with self._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT content
-                    FROM {schema}.logs
-                    WHERE run_id = %s AND name = %s
-                """,
-                    [run_id, log_name],
-                )
-                row = cur.fetchone()
-                if row:
-                    return row[0]
+        exp_root = Path(self._file_root)
+        experiment_id = self._get_experiment_id_for_run(run_id)
+        if not experiment_id:
+            return None
+
+        safe_id = safe_experiment_id(experiment_id)
+        log_path = exp_root / safe_id / "logs" / f"{run_id}_{log_name}.log"
+        if log_path.exists():
+            return log_path.read_text()
 
         return None
 
     def list_logs(self, run_id: str) -> list[str]:
         """List available log names for a run.
 
-        Scans both filesystem (new architecture) and database (legacy).
-
-        Searches in order:
-        1. Experiment subdirectory: {file_root}/{safe_exp_id}/logs/
-        2. Flat structure (legacy): {file_root}/logs/
-        3. Database (legacy)
+        Scans filesystem for logs stored via FileStore composition.
+        Path: {file_root}/{safe_exp_id}/logs/{run_id}_*.log
         """
         log_names: set[str] = set()
 
-        # Primary: filesystem (new architecture with FileStore composition)
-        if self._file_root:
-            exp_root = Path(self._file_root)
+        if not self._file_root:
+            return []
 
-            # Try experiment subdirectory first
-            experiment_id = self._get_experiment_id_for_run(run_id)
-            if experiment_id:
-                safe_id = safe_experiment_id(experiment_id)
-                log_dir = exp_root / safe_id / "logs"
-                if log_dir.exists():
-                    for log_file in log_dir.glob(f"{run_id}_*.log"):
-                        filename = log_file.stem  # Remove .log
-                        if filename.startswith(f"{run_id}_"):
-                            name = filename[len(run_id) + 1 :]
-                            log_names.add(name)
+        exp_root = Path(self._file_root)
+        experiment_id = self._get_experiment_id_for_run(run_id)
+        if not experiment_id:
+            return []
 
-            # Also check flat structure (legacy)
-            log_dir = exp_root / "logs"
-            if log_dir.exists():
-                # New format: {run_id}_{name}.log
-                for log_file in log_dir.glob(f"{run_id}_*.log"):
-                    # Extract name from "{run_id}_{name}.log"
-                    filename = log_file.stem  # Remove .log
-                    if filename.startswith(f"{run_id}_"):
-                        name = filename[len(run_id) + 1 :]
-                        log_names.add(name)
-
-        # Fallback: database (legacy storage)
-        scope = self._scope_for_run(run_id)
-        schema = scope.single_schema()
-        if schema:
-            with self._get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"""
-                        SELECT DISTINCT name
-                        FROM {schema}.logs
-                        WHERE run_id = %s
-                    """,
-                        [run_id],
-                    )
-                    for (name,) in cur.fetchall():
-                        log_names.add(name)
+        safe_id = safe_experiment_id(experiment_id)
+        log_dir = exp_root / safe_id / "logs"
+        if log_dir.exists():
+            for log_file in log_dir.glob(f"{run_id}_*.log"):
+                filename = log_file.stem  # Remove .log
+                if filename.startswith(f"{run_id}_"):
+                    name = filename[len(run_id) + 1 :]
+                    log_names.add(name)
 
         return sorted(log_names)
 
