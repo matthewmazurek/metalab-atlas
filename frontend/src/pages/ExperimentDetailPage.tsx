@@ -628,7 +628,7 @@ export function ExperimentDetailPage() {
               </CardHeader>
               <CardContent>
                 {manifestsData && manifestsData.manifests.length > 0 ? (
-                  <div className="grid gap-2 grid-cols-1">
+                  <div className="grid gap-2 grid-cols-1 max-h-[13rem] overflow-y-auto">
                     {manifestsData.manifests.map((m) => (
                       <div
                         key={m.timestamp}

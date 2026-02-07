@@ -113,7 +113,9 @@ def serve(
         bundle_path = Path(discover) / "services" / "bundle.json"
         if not bundle_path.exists():
             click.echo(f"Error: No bundle.json found at {bundle_path}", err=True)
-            click.echo("Run 'metalab atlas up' first to provision services.", err=True)
+            click.echo(
+                "Run 'metalab services up' first to provision services.", err=True
+            )
             raise SystemExit(1)
 
         bundle_data = json.loads(bundle_path.read_text())
