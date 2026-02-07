@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { StatusBadge } from './StatusBadge';
 import { ColumnHeader, type SortDirection } from './ColumnHeader';
+import { TruncatedId } from '@/components/ui/truncated-id';
 import { useAtlasStore } from '@/store/useAtlasStore';
 import type { RunResponse, FieldInfo } from '@/api/types';
 import { PaginationBar } from '@/components/ui/PaginationBar';
@@ -204,9 +205,9 @@ function RunTableImpl({
         render: (run) => (
           <Link
             to={`/runs/${run.record.run_id}`}
-            className="font-mono text-sm text-brand-secondary hover:underline"
+            className="text-sm text-brand-secondary hover:underline"
           >
-            {run.record.run_id.slice(0, 8)}...
+            <TruncatedId value={run.record.run_id} />
           </Link>
         ),
         getValue: (run) => run.record.run_id,
@@ -340,9 +341,7 @@ function RunTableImpl({
           sortable: true,
           filterable: true,
           render: (run) => (
-            <span className="font-mono text-sm text-muted-foreground" title={run.record.seed_fingerprint}>
-              {run.record.seed_fingerprint.slice(0, 8)}...
-            </span>
+            <TruncatedId value={run.record.seed_fingerprint} className="text-sm text-muted-foreground" />
           ),
           getValue: (run) => run.record.seed_fingerprint,
         });

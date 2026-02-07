@@ -132,6 +132,12 @@ class SchemaScope:
         return f"SchemaScope({self._schemas})"
 
 
+# Custom query parameters that metalab embeds in the connection URL but
+# that are not valid PostgreSQL connection parameters.  These must be
+# stripped before the URL is handed to psycopg / libpq.
+_CUSTOM_QUERY_PARAMS = {"file_root", "schema"}
+
+
 def _parse_postgres_url(url: str) -> dict[str, Any]:
     """Parse a Postgres connection URL into components."""
     parsed = urlparse(url)
@@ -150,6 +156,25 @@ def _parse_postgres_url(url: str) -> dict[str, Any]:
         "schema": params.get("schema", "public"),
         "file_root": params.get("file_root"),
     }
+
+
+def _clean_postgres_url(url: str) -> str:
+    """Return a connection URL safe for psycopg (custom params stripped)."""
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+
+    # Keep only parameters that are NOT in our custom set
+    original = parse_qs(parsed.query)
+    cleaned = {k: v for k, v in original.items() if k not in _CUSTOM_QUERY_PARAMS}
+
+    if cleaned:
+        from urllib.parse import urlencode
+        new_query = urlencode(cleaned, doseq=True)
+    else:
+        new_query = ""
+
+    return parsed._replace(query=new_query).geturl()
 
 
 class PostgresStoreAdapter:
@@ -183,10 +208,10 @@ class PostgresStoreAdapter:
                 "Install with: pip install metalab-atlas[postgres]"
             )
 
-        self._connection_string = connection_string
+        self._connection_string = _clean_postgres_url(connection_string)
         self._connect_timeout = connect_timeout
 
-        # Parse URL for config
+        # Parse URL for config (uses original URL so custom params are visible)
         config = _parse_postgres_url(connection_string)
         self._schema = config["schema"]
         self._file_root = file_root or config.get("file_root")

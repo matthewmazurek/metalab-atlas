@@ -45,6 +45,12 @@ def main():
     type=click.Path(),
 )
 @click.option(
+    "--discover",
+    default=None,
+    help="Auto-discover store connection from bundle.json at given path",
+    type=click.Path(exists=True),
+)
+@click.option(
     "--file-root",
     default=None,
     help="Root directory for files (logs, artifacts) when using PostgreSQL stores",
@@ -69,6 +75,7 @@ def main():
 def serve(
     store: str | None,
     remote: str | None,
+    discover: str | None,
     ssh_key: str | None,
     cache_dir: str | None,
     file_root: str | None,
@@ -91,10 +98,39 @@ def serve(
 
         # Remote with SSH key
         metalab-atlas serve --remote ssh://user@host/path --ssh-key ~/.ssh/id_rsa
+
+        # Auto-discover from service bundle
+        metalab-atlas serve --discover /path/to/file_root
     """
     import uvicorn
 
     from atlas.deps import is_postgres_url
+
+    # Handle --discover mode
+    if discover:
+        import json
+
+        bundle_path = Path(discover) / "services" / "bundle.json"
+        if not bundle_path.exists():
+            click.echo(f"Error: No bundle.json found at {bundle_path}", err=True)
+            click.echo("Run 'metalab atlas up' first to provision services.", err=True)
+            raise SystemExit(1)
+
+        bundle_data = json.loads(bundle_path.read_text())
+        discovered_store = bundle_data.get("store_locator")
+        if not discovered_store:
+            click.echo("Error: bundle.json has no store_locator", err=True)
+            raise SystemExit(1)
+
+        if store:
+            click.echo("Warning: --discover overrides --store", err=True)
+        store = discovered_store
+
+        # Use discover path as file_root if not explicitly set
+        if not file_root:
+            file_root = discover
+
+        click.echo(f"Discovered store: {store}")
 
     # Validate options
     if store and remote:

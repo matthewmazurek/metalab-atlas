@@ -12,6 +12,7 @@ import { LogViewer } from '@/components/detail/LogViewer';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
+import { TruncatedId } from '@/components/ui/truncated-id';
 import { SECTION_HEADING_CLASS } from '@/lib/styles';
 import {
   AlertCircle,
@@ -43,21 +44,50 @@ export function RunDetailPage() {
   const hasDerived = run ? Object.keys(run.derived_metrics).length > 0 : false;
   const hasParams = run ? Object.keys(run.params).length > 0 : false;
 
-  // Compact param summary for the page title (e.g. "lr=0.01 · batch_size=32")
+  // Full identifiers (used by TruncatedId for tooltip)
+  const fullRunId = run?.record.run_id ?? runId ?? '';
+  const fullSeed = run?.record.seed_fingerprint;
+
+  // Compact param pills for the page title (e.g. GENE Gene_0001  SEED a1b2c3d4…)
   const MAX_TITLE_PARAMS = 3;
   const paramTitle = useMemo(() => {
     if (!run || !hasParams) return null;
     const entries = Object.entries(run.params);
-    const visible = entries.slice(0, MAX_TITLE_PARAMS).map(
-      ([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`
-    );
+    const visible = entries.slice(0, MAX_TITLE_PARAMS);
     const rest = entries.length - MAX_TITLE_PARAMS;
-    return rest > 0 ? `${visible.join(' · ')} +${rest} more` : visible.join(' · ');
-  }, [run, hasParams]);
-
-  // Truncated identifiers for header display
-  const shortRunId = (run?.record.run_id ?? runId ?? '').slice(0, 8) + '…';
-  const shortSeed = run?.record.seed_fingerprint?.slice(0, 8);
+    return (
+      <div className="flex flex-wrap items-end divide-x divide-border/40">
+        {visible.map(([k, v]) => {
+          const display = typeof v === 'string' ? v : JSON.stringify(v);
+          return (
+            <div key={k} className="px-4 first:pl-0 last:pr-0">
+              <div className="font-sans text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                {k}
+              </div>
+              <div className="text-3xl font-bold leading-tight tracking-tight text-foreground font-sans">
+                <TruncatedId value={display} chars={20} mono={false} />
+              </div>
+            </div>
+          );
+        })}
+        {fullSeed && (
+          <div className="px-4 first:pl-0 last:pr-0">
+            <div className="font-sans text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              seed
+            </div>
+            <div className="text-3xl font-bold leading-tight tracking-tight text-foreground">
+              <TruncatedId value={fullSeed} />
+            </div>
+          </div>
+        )}
+        {rest > 0 && (
+          <div className="px-4 self-end pb-1">
+            <span className="text-sm text-muted-foreground font-normal">+{rest} more</span>
+          </div>
+        )}
+      </div>
+    );
+  }, [run, hasParams, fullSeed]);
 
   // Merged metrics + derived for MetricsSummaryCard (run-context mode)
   const runValues = useMemo(
@@ -119,19 +149,12 @@ export function RunDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={paramTitle ?? <span className="font-mono">{shortRunId}</span>}
-        subtitle={
-          shortSeed && (
-            <span className="font-mono text-xs text-muted-foreground">
-              seed {shortSeed}
-            </span>
-          )
-        }
+        title={paramTitle ?? <TruncatedId value={fullRunId} className="text-4xl font-bold tracking-tight" />}
         breadcrumb={[
           { label: 'Experiments', href: '/experiments' },
           { label: experimentId, href: `/experiments/${encodeURIComponent(experimentId)}` },
           { label: 'Runs', href: `/runs?experiment_id=${encodeURIComponent(experimentId)}` },
-          { label: shortRunId },
+          { label: <TruncatedId value={fullRunId} /> },
         ]}
       />
 

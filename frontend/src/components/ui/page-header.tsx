@@ -44,7 +44,7 @@ export function PageHeader({
         {/* Title + subtitle + actions */}
         <div className="flex shrink-0 items-center justify-between gap-6">
           <div className="min-w-0">
-            <h1 className="font-sans text-4xl font-bold tracking-tight text-foreground overflow-x-clip text-ellipsis whitespace-nowrap">
+            <h1 className="font-sans text-4xl font-bold tracking-tight text-foreground">
               {title}
             </h1>
             {subtitle && (

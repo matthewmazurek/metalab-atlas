@@ -85,7 +85,24 @@ function FieldTable({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const selectedRef = useCallback((node: HTMLTableRowElement | null) => {
     if (node) {
-      node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // Scroll only the overflow container, not the full window
+      const container = node.closest<HTMLElement>('.overflow-y-auto');
+      if (container) {
+        const nodeRect = node.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+
+        if (nodeRect.top < containerRect.top) {
+          container.scrollTo({
+            top: container.scrollTop + nodeRect.top - containerRect.top,
+            behavior: 'smooth',
+          });
+        } else if (nodeRect.bottom > containerRect.bottom) {
+          container.scrollTo({
+            top: container.scrollTop + nodeRect.bottom - containerRect.bottom,
+            behavior: 'smooth',
+          });
+        }
+      }
     }
   }, [selectedField]);
 

@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import { fetchRun } from '@/api/client';
 import { queryKeys } from '@/api/hooks';
 import { StatusBadge } from './StatusBadge';
+import { TruncatedId } from '@/components/ui/truncated-id';
 import { ArtifactPreviewDialog } from '@/components/detail/ArtifactList';
 import { getArtifactIcon } from '@/components/detail/artifact-icons';
 import {
@@ -220,9 +221,9 @@ export function CompareTable({ runIds }: CompareTableProps) {
                     {/* Run ID link */}
                     <Link
                       to={`/runs/${run.record.run_id}`}
-                      className="font-mono text-sm text-brand-secondary hover:underline font-semibold"
+                      className="text-sm text-brand-secondary hover:underline font-semibold"
                     >
-                      {run.record.run_id.slice(0, 8)}...
+                      <TruncatedId value={run.record.run_id} />
                     </Link>
                     {/* Experiment ID */}
                     <div className="text-xs text-muted-foreground truncate max-w-[160px]">
