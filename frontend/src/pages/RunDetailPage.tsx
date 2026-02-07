@@ -258,7 +258,7 @@ export function RunDetailPage() {
                   </div>
                 </div>
 
-              {/* Executor */}
+                {/* Executor */}
                 <div className="rounded-lg border border-border/50 bg-card/70 px-3 py-2">
                   <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Executor

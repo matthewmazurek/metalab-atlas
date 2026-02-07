@@ -31,12 +31,13 @@ packages = ["atlas"]
 [tool.hatch.build.targets.wheel.sources]
 "atlas" = "atlas"
 
-# Include bundled frontend static files
+# Build the React frontend into atlas/static/ before packaging
+[tool.hatch.build.hooks.custom]
+
 [tool.hatch.build.targets.sdist]
 include = [
     "atlas/**/*.py",
     "atlas/static/**/*",
+    "frontend/**/*",
+    "hatch_build.py",
 ]
-
-[tool.hatch.build.targets.wheel.force-include]
-"atlas/static" = "atlas/static"

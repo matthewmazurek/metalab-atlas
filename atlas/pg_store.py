@@ -170,6 +170,7 @@ def _clean_postgres_url(url: str) -> str:
 
     if cleaned:
         from urllib.parse import urlencode
+
         new_query = urlencode(cleaned, doseq=True)
     else:
         new_query = ""
