@@ -1,7 +1,11 @@
+/**
+ * DistributionCard - Shows histogram distribution for a metric on the experiment page.
+ * Delegates chart building to the shared buildEChartsOption spec builder.
+ */
+
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
-import { useFields, useHistogram } from '@/api/hooks';
+import { useFields, useFieldValues, useStatusCounts } from '@/api/hooks';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -12,8 +16,10 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, BarChart3, Loader2 } from 'lucide-react';
-import { useAtlasStore } from '@/store/useAtlasStore';
-import { buildHistogramChartOption } from '@/components/plots/histogram-utils';
+import { useAtlasStore, type PlotConfig } from '@/store/useAtlasStore';
+import { buildEChartsOption } from '@/lib/echarts-spec';
+import { EChartsChart, type PointClickData } from '@/components/plots/EChartsChart';
+import { toNumericArray } from '@/lib/stats';
 
 interface DistributionCardProps {
   experimentId: string;
@@ -21,6 +27,8 @@ interface DistributionCardProps {
   onFieldChange?: (field: string) => void;
   /** When true, polls data more frequently (for in-progress experiments) */
   isInProgress?: boolean;
+  /** When set, overlay a vertical marker line at this value */
+  runValue?: number | null;
 }
 
 export function DistributionCard({
@@ -28,10 +36,12 @@ export function DistributionCard({
   selectedField: controlledField,
   onFieldChange,
   isInProgress = false,
+  runValue,
 }: DistributionCardProps) {
   const navigate = useNavigate();
-  const { darkMode, setSelectionFilter, setPlotConfig } = useAtlasStore();
+  const { darkMode, setSelectionFilter, setPlotConfig, addFieldFilter } = useAtlasStore();
   const { data: fieldsData, isLoading: fieldsLoading } = useFields(experimentId, isInProgress);
+  const { data: statusCounts } = useStatusCounts(experimentId);
   const [internalField, setInternalField] = useState<string>('');
 
   // Use controlled or internal state
@@ -74,51 +84,70 @@ export function DistributionCard({
     return null;
   }, [effectiveField, fieldsData]);
 
-  // Calculate optimal bin count using Freedman-Diaconis-inspired heuristic
-  // Falls back to Sturges' rule: k = ceil(1 + log2(n))
+  // Calculate optimal bin count using Sturges' rule
   const optimalBinCount = useMemo(() => {
     const n = selectedFieldInfo?.count || 0;
-    if (n <= 1) return 10; // Minimum default
-
-    // Sturges' rule as base
+    if (n <= 1) return 10;
     const sturges = Math.ceil(1 + Math.log2(n));
-
-    // Square root rule as alternative
     const sqrtRule = Math.ceil(Math.sqrt(n));
-
-    // Use the smaller of the two, but clamp to reasonable range
     const computed = Math.min(sturges, sqrtRule);
-
-    // Clamp between 5 and 50 bins
     return Math.max(5, Math.min(50, computed));
   }, [selectedFieldInfo]);
 
-  // Fetch histogram data
-  const histogramRequest = effectiveField
-    ? {
-      field: effectiveField,
-      bin_count: optimalBinCount,
+  // Fetch field values for histogram
+  const { data: fieldValuesData, isLoading: valuesLoading } = useFieldValues(
+    {
       filter: { experiment_id: experimentId },
-    }
-    : null;
-
-  const { data: histogramData, isLoading: histogramLoading } = useHistogram(
-    histogramRequest,
-    !!effectiveField,
-    isInProgress
+      fields: effectiveField ? [effectiveField] : [],
+      max_points: 10000,
+      include_run_ids: true,
+    },
+    !!effectiveField
   );
 
-  // Build chart option using shared utility
-  const chartOption = useMemo(() => {
-    if (!histogramData || histogramData.bins.length === 0) return null;
+  // Build ECharts option via shared spec builder
+  const echartsOption = useMemo(() => {
+    if (!fieldValuesData || !effectiveField) return null;
 
-    return buildHistogramChartOption({
-      histogramData,
-      darkMode,
+    const config: PlotConfig = {
+      chartType: 'histogram',
+      xField: '',
       yField: effectiveField,
-      compact: true, // Compact mode for the card view
+      groupBy: null,
+      aggregation: 'none',
+      errorBars: 'none',
+      binCount: optimalBinCount,
+    };
+
+    return buildEChartsOption({
+      config,
+      data: fieldValuesData,
+      theme: darkMode ? 'dark' : 'light',
+      overrides: {
+        grid: { left: 50, right: 20, top: 20, bottom: 40 },
+        markLineValue: runValue != null && Number.isFinite(runValue)
+          ? { value: runValue, label: `This run: ${runValue.toPrecision(4)}` }
+          : undefined,
+      },
     });
-  }, [histogramData, darkMode, effectiveField]);
+  }, [fieldValuesData, effectiveField, optimalBinCount, darkMode, runValue]);
+
+  // Count numeric values for summary display
+  const numericCount = useMemo(() => {
+    if (!fieldValuesData || !effectiveField) return 0;
+    const values = fieldValuesData.fields[effectiveField];
+    return values ? toNumericArray(values).length : 0;
+  }, [fieldValuesData, effectiveField]);
+
+  // Handle histogram bar click - navigate to run detail or filtered runs list
+  const handlePointClick = (data: PointClickData) => {
+    if (data.runId) {
+      navigate(`/runs/${data.runId}`);
+    } else if (data.runIds && data.runIds.length > 0) {
+      addFieldFilter({ field: 'record.run_id', op: 'in', value: data.runIds, _fromPlot: true });
+      navigate(`/runs?experiment_id=${encodeURIComponent(experimentId)}`);
+    }
+  };
 
   // Loading state
   if (fieldsLoading) {
@@ -209,15 +238,15 @@ export function DistributionCard({
 
         {/* Histogram chart */}
         <div className="relative min-h-[200px]">
-          {histogramLoading ? (
+          {valuesLoading ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : chartOption ? (
-            <ReactECharts
-              option={chartOption}
-              style={{ height: '200px', width: '100%' }}
-              notMerge={true}
+          ) : echartsOption ? (
+            <EChartsChart
+              option={echartsOption}
+              onPointClick={handlePointClick}
+              height="180px"
             />
           ) : (
             <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">
@@ -227,9 +256,12 @@ export function DistributionCard({
         </div>
 
         {/* Summary stats */}
-        {histogramData && (
+        {numericCount > 0 && (
           <div className="text-xs text-muted-foreground text-center">
-            {histogramData.total} values across {histogramData.bins.length - 1} bins
+            {numericCount.toLocaleString()} values across {optimalBinCount} bins
+            {runValue != null && Number.isFinite(runValue) && (
+              <> | This run: {runValue.toPrecision(4)}</>
+            )}
           </div>
         )}
 
@@ -241,19 +273,19 @@ export function DistributionCard({
             className="w-full justify-between"
             onClick={() => {
               // Set filter-based selection for all runs in this experiment
-              const runCount = fieldsData?.run_count || 0;
+              // Use status counts (experiment-scoped) for accurate run count
+              const runCount = statusCounts?.total ?? fieldsData?.run_count ?? 0;
               setSelectionFilter({ experiment_id: experimentId }, runCount);
 
               // Pre-configure the plot with histogram chart type and selected field
               setPlotConfig({
-                x_field: '',
-                y_field: effectiveField || '',
-                group_by: [],
-                chart_type: 'histogram',
-                bin_count: optimalBinCount,
-                agg_fn: 'none',
-                error_bars: 'none',
-                aggregate_replicates: true,
+                chartType: 'histogram',
+                xField: '',
+                yField: effectiveField || '',
+                groupBy: null,
+                aggregation: 'none',
+                errorBars: 'none',
+                binCount: optimalBinCount,
               });
 
               // Navigate to plots page

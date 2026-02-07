@@ -5,29 +5,22 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AggFn, ChartType, ErrorBarType, FilterSpec, FieldFilter } from '@/api/types';
+import type { FilterSpec, FieldFilter } from '@/api/types';
+import type { AccentThemeId } from '@/lib/accent-themes';
 
 export interface PlotConfig {
-  x_field: string;
-  y_field: string;
-  group_by: string[];
-  chart_type: ChartType;
-  bin_count: number;
-  agg_fn: AggFn;
-  error_bars: ErrorBarType;
-  aggregate_replicates: boolean;
+  chartType: 'scatter' | 'line' | 'bar' | 'histogram';
+  xField: string;
+  yField: string;
+  groupBy: string | null;
+  aggregation: 'none' | 'mean' | 'median' | 'min' | 'max' | 'count';
+  errorBars: 'none' | 'std' | 'sem';
+  binCount: number;
 }
 
 export interface TableSort {
   field: string;
   order: 'asc' | 'desc';
-}
-
-export interface ColumnFilter {
-  columnId: string;
-  field: string;
-  value: string;           // For contains filter (text search)
-  values?: string[];       // For multi-select filter (discrete values)
 }
 
 /**
@@ -46,23 +39,27 @@ interface AtlasUIState {
   // Selection state - now supports both explicit IDs and filter-based selection
   selectedRunIds: string[];  // Legacy: kept for explicit selection
   selectionFilter: { filter: FilterSpec; count: number } | null;  // For "Select All"
+  selectionExperimentId: string | null;  // Preserved experiment context for explicit selection
   baselineRunId: string | null;
 
   // UI preferences
   pinnedColumns: string[];
   darkMode: boolean;
+  accentTheme: AccentThemeId;
   sidebarCollapsed: boolean;
   visibleColumns: Record<string, string[]>; // experiment_id -> visible column IDs
 
-  // Filter state (synced with URL)
+  // Filter state - single source of truth for all filters
   filter: FilterSpec;
 
   // Table state
   tableSort: TableSort | null;
-  columnFilters: ColumnFilter[];
 
   // Plot builder state
   plotConfig: PlotConfig | null;
+
+  // Run detail: remembered metric selection (persisted across runs)
+  selectedMetricField: string;
 
   // Actions
   setSelectedRunIds: (ids: string[]) => void;
@@ -74,6 +71,7 @@ interface AtlasUIState {
   setBaselineRunId: (id: string | null) => void;
   setPinnedColumns: (columns: string[]) => void;
   toggleDarkMode: () => void;
+  setAccentTheme: (themeId: AccentThemeId) => void;
   toggleSidebar: () => void;
   setVisibleColumns: (experimentId: string, columns: string[]) => void;
   getVisibleColumns: (experimentId: string) => string[] | undefined;
@@ -82,12 +80,14 @@ interface AtlasUIState {
   setPlotConfig: (config: PlotConfig | null) => void;
   updatePlotConfig: (partial: Partial<PlotConfig>) => void;
   setTableSort: (sort: TableSort | null) => void;
-  setColumnFilter: (columnId: string, field: string, value: string) => void;
-  setColumnFilterValues: (columnId: string, field: string, values: string[]) => void;
-  clearColumnFilter: (columnId: string) => void;
-  clearAllColumnFilters: () => void;
-  getFieldFilters: () => FieldFilter[];
-  getColumnFilterValues: (columnId: string) => string[];
+  // Run detail: remembered metric selection
+  setSelectedMetricField: (field: string) => void;
+  // Field filter actions - work directly with filter.field_filters
+  addFieldFilter: (fieldFilter: FieldFilter) => void;
+  removeFieldFilter: (field: string) => void;
+  clearFieldFilters: () => void;
+  setFieldFilterValues: (field: string, values: string[]) => void;
+  getFieldFilterValues: (field: string) => string[];
 }
 
 export const useAtlasStore = create<AtlasUIState>()(
@@ -96,31 +96,45 @@ export const useAtlasStore = create<AtlasUIState>()(
       // Initial state
       selectedRunIds: [],
       selectionFilter: null,
+      selectionExperimentId: null,
       baselineRunId: null,
       pinnedColumns: ['record.status', 'record.duration_ms'],
       darkMode: false,
+      accentTheme: 'bold-modern',
       sidebarCollapsed: false,
       visibleColumns: {},
       filter: {},
       tableSort: { field: 'record.started_at', order: 'desc' },
-      columnFilters: [],
       plotConfig: null,
+      selectedMetricField: '',
 
       // Actions
-      // Setting explicit IDs clears any filter-based selection
-      setSelectedRunIds: (ids) => set({ selectedRunIds: ids, selectionFilter: null }),
+      // Setting explicit IDs clears any filter-based selection, preserves experiment context
+      setSelectedRunIds: (ids) => set((state) => ({
+        selectedRunIds: ids,
+        selectionFilter: null,
+        // Capture the current experiment context for later navigation
+        selectionExperimentId: state.filter.experiment_id ?? state.selectionExperimentId ?? null,
+      })),
 
       // Toggling a run switches to explicit selection mode
       toggleRunSelection: (id) =>
         set((state) => {
           // If we had a filter-based selection, switching to explicit mode starts fresh
           if (state.selectionFilter) {
-            return { selectedRunIds: [id], selectionFilter: null };
+            return {
+              selectedRunIds: [id],
+              selectionFilter: null,
+              // Capture experiment context from filter-based selection
+              selectionExperimentId: state.selectionFilter.filter.experiment_id ?? state.filter.experiment_id ?? null,
+            };
           }
           return {
             selectedRunIds: state.selectedRunIds.includes(id)
               ? state.selectedRunIds.filter((x) => x !== id)
               : [...state.selectedRunIds, id],
+            // Capture experiment context if not already set
+            selectionExperimentId: state.selectionExperimentId ?? state.filter.experiment_id ?? null,
           };
         }),
 
@@ -128,7 +142,7 @@ export const useAtlasStore = create<AtlasUIState>()(
       setSelectionFilter: (filter, count) =>
         set({ selectionFilter: { filter, count }, selectedRunIds: [] }),
 
-      clearSelection: () => set({ selectedRunIds: [], selectionFilter: null, baselineRunId: null }),
+      clearSelection: () => set({ selectedRunIds: [], selectionFilter: null, selectionExperimentId: null, baselineRunId: null }),
 
       hasSelection: () => {
         const state = get();
@@ -152,6 +166,8 @@ export const useAtlasStore = create<AtlasUIState>()(
 
       toggleDarkMode: () =>
         set((state) => ({ darkMode: !state.darkMode })),
+
+      setAccentTheme: (themeId) => set({ accentTheme: themeId }),
 
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -181,66 +197,93 @@ export const useAtlasStore = create<AtlasUIState>()(
 
       setTableSort: (sort) => set({ tableSort: sort }),
 
-      setColumnFilter: (columnId, field, value) =>
+      setSelectedMetricField: (field) => set({ selectedMetricField: field }),
+
+      // Add a field filter (replaces any existing filter for the same field)
+      addFieldFilter: (fieldFilter) =>
         set((state) => {
-          const existing = state.columnFilters.filter((f) => f.columnId !== columnId);
-          if (value) {
-            return { columnFilters: [...existing, { columnId, field, value }] };
-          }
-          return { columnFilters: existing };
+          const existing = state.filter.field_filters?.filter((f) => f.field !== fieldFilter.field) || [];
+          return {
+            filter: {
+              ...state.filter,
+              field_filters: [...existing, fieldFilter],
+            },
+          };
         }),
 
-      setColumnFilterValues: (columnId, field, values) =>
+      // Remove a field filter by field name
+      removeFieldFilter: (field) =>
         set((state) => {
-          const existing = state.columnFilters.filter((f) => f.columnId !== columnId);
-          if (values.length > 0) {
-            return { columnFilters: [...existing, { columnId, field, value: '', values }] };
-          }
-          return { columnFilters: existing };
+          const existing = state.filter.field_filters?.filter((f) => f.field !== field) || [];
+          return {
+            filter: {
+              ...state.filter,
+              field_filters: existing.length > 0 ? existing : undefined,
+            },
+          };
         }),
 
-      clearColumnFilter: (columnId) =>
+      // Clear all field filters
+      clearFieldFilters: () =>
         set((state) => ({
-          columnFilters: state.columnFilters.filter((f) => f.columnId !== columnId),
+          filter: {
+            ...state.filter,
+            field_filters: undefined,
+          },
         })),
 
-      clearAllColumnFilters: () => set({ columnFilters: [] }),
-
-      getFieldFilters: () => {
-        const { columnFilters } = get();
-        return columnFilters
-          .filter((cf) => cf.value || (cf.values && cf.values.length > 0))
-          .map((cf) => {
-            // Use 'in' operator for multi-select values, 'contains' for text search
-            if (cf.values && cf.values.length > 0) {
-              return {
-                field: cf.field,
-                op: 'in' as const,
-                value: cf.values,
-              };
-            }
+      // Set multi-select values for a field (uses 'in' operator)
+      setFieldFilterValues: (field, values) =>
+        set((state) => {
+          const existing = state.filter.field_filters?.filter((f) => f.field !== field) || [];
+          if (values.length > 0) {
             return {
-              field: cf.field,
-              op: 'contains' as const,
-              value: cf.value,
+              filter: {
+                ...state.filter,
+                field_filters: [...existing, { field, op: 'in' as const, value: values }],
+              },
             };
-          });
-      },
+          }
+          // If no values, remove the filter
+          return {
+            filter: {
+              ...state.filter,
+              field_filters: existing.length > 0 ? existing : undefined,
+            },
+          };
+        }),
 
-      getColumnFilterValues: (columnId) => {
-        const { columnFilters } = get();
-        const filter = columnFilters.find((f) => f.columnId === columnId);
-        return filter?.values || [];
+      // Get current filter values for a field (for multi-select UI)
+      getFieldFilterValues: (field) => {
+        const { filter } = get();
+        const fieldFilter = filter.field_filters?.find((f) => f.field === field);
+        if (fieldFilter && fieldFilter.op === 'in' && Array.isArray(fieldFilter.value)) {
+          return fieldFilter.value as string[];
+        }
+        return [];
       },
     }),
     {
       name: 'atlas-ui-storage',
       partialize: (state) => ({
+        // Selection state
         selectedRunIds: state.selectedRunIds,
+        selectionExperimentId: state.selectionExperimentId,
+        selectionFilter: state.selectionFilter,
+        baselineRunId: state.baselineRunId,
+        // UI preferences
         pinnedColumns: state.pinnedColumns,
         darkMode: state.darkMode,
+        accentTheme: state.accentTheme,
         sidebarCollapsed: state.sidebarCollapsed,
         visibleColumns: state.visibleColumns,
+        // Filter & table state
+        filter: state.filter,
+        tableSort: state.tableSort,
+        // Plot configuration
+        plotConfig: state.plotConfig,
+        // Run detail metric selection
+        selectedMetricField: state.selectedMetricField,
       }),
     }
   )

@@ -138,7 +138,7 @@ export function ColumnHeader({
           <span>{title}</span>
           <span className="flex items-center gap-0.5">
             {hasActiveSort && (
-              <span className="text-primary">
+              <span className="text-brand-tertiary">
                 {sortDirection === 'asc' ? (
                   <ArrowUp className="h-3.5 w-3.5" />
                 ) : (
@@ -147,7 +147,7 @@ export function ColumnHeader({
               </span>
             )}
             {hasActiveFilter && (
-              <Filter className="h-3.5 w-3.5 text-primary" />
+              <Filter className="h-3.5 w-3.5 text-brand-tertiary" />
             )}
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </span>

@@ -11,12 +11,11 @@ import type {
   FieldValuesRequest,
   FieldValuesResponse,
   FilterSpec,
-  HistogramRequest,
-  HistogramResponse,
   ManifestListResponse,
   ManifestResponse,
   RunListResponse,
   RunResponse,
+  SearchResponse,
   SlurmArrayStatusResponse,
   StatusCounts,
 } from './types';
@@ -55,9 +54,10 @@ function buildRunsParams(params: {
   if (params.filter?.started_before) {
     searchParams.set('started_before', params.filter.started_before);
   }
-  // Pass field_filters as JSON-encoded query param
+  // Pass field_filters as JSON-encoded query param (strip UI-only _fromPlot)
   if (params.filter?.field_filters && params.filter.field_filters.length > 0) {
-    searchParams.set('field_filters', JSON.stringify(params.filter.field_filters));
+    const serializable = params.filter.field_filters.map(({ field, op, value }) => ({ field, op, value }));
+    searchParams.set('field_filters', JSON.stringify(serializable));
   }
   if (params.sort_by) {
     searchParams.set('sort_by', params.sort_by);
@@ -147,11 +147,6 @@ export async function fetchFieldValues(request: FieldValuesRequest): Promise<Fie
   return response.data;
 }
 
-export async function fetchHistogram(request: HistogramRequest): Promise<HistogramResponse> {
-  const response = await api.post<HistogramResponse>('/api/histogram', request);
-  return response.data;
-}
-
 export async function refreshStores(): Promise<{ stores_discovered: number; message: string }> {
   const response = await api.post<{ stores_discovered: number; message: string }>('/api/meta/refresh');
   return response.data;
@@ -238,5 +233,23 @@ export async function fetchStatusCounts(
   const response = await api.get<StatusCounts>(
     `/api/experiments/${encodeURIComponent(experimentId)}/status-counts`
   );
+  return response.data;
+}
+
+export async function fetchSearch(
+  q: string,
+  limit = 5
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: q.trim(), limit: String(limit) });
+  const response = await api.get<SearchResponse>(`/api/search?${params}`);
+  return response.data;
+}
+
+export async function fetchSearchLogs(
+  q: string,
+  limit = 5
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: q.trim(), limit: String(limit) });
+  const response = await api.get<SearchResponse>(`/api/search/logs?${params}`);
   return response.data;
 }

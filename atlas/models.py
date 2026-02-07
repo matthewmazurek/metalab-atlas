@@ -484,18 +484,52 @@ class AggregateResponse(BaseModel):
     y_field: str
 
 
-class HistogramRequest(BaseModel):
-    """Request for histogram computation."""
-
-    field: str = Field(..., description="Field to compute histogram for")
-    bin_count: int = Field(default=20, ge=1, le=100, description="Number of bins")
-    filter: FilterSpec | None = Field(default=None, description="Filter to apply")
+# =============================================================================
+# Search Models
+# =============================================================================
 
 
-class HistogramResponse(BaseModel):
-    """Histogram bin data."""
+class SearchHit(BaseModel):
+    """Single search result item."""
 
-    field: str
-    bins: list[float] = Field(..., description="Bin edges")
-    counts: list[int] = Field(..., description="Counts per bin")
-    total: int = Field(..., description="Total count")
+    label: str = Field(..., description="Display text (e.g., experiment id, run id)")
+    sublabel: str | None = Field(
+        default=None,
+        description="Secondary text (e.g., '42 runs', 'in experiment: foo')",
+    )
+    entity_type: str = Field(..., description="'experiment' or 'run' for navigation")
+    entity_id: str = Field(..., description="experiment_id or run_id for navigation")
+    field: str | None = Field(
+        default=None,
+        description="For field-value hits: the field name (e.g., 'params.optimizer')",
+    )
+    value: str | None = Field(
+        default=None,
+        description="For field-value hits: the matched value",
+    )
+
+
+class SearchGroup(BaseModel):
+    """Categorized group of search hits."""
+
+    category: str = Field(
+        ...,
+        description="Category key: experiments, runs, param_names, param_values, etc.",
+    )
+    label: str = Field(..., description="Display label for the group header")
+    scope: str = Field(
+        ..., description="'experiment' or 'run' -- determines navigation behavior"
+    )
+    hits: list[SearchHit] = Field(default_factory=list)
+    total: int = Field(..., description="Total matches (may exceed len(hits))")
+
+
+class SearchResponse(BaseModel):
+    """Response from search endpoint."""
+
+    query: str = Field(..., description="The search query")
+    groups: list[SearchGroup] = Field(default_factory=list)
+    truncated: bool = Field(
+        default=False,
+        description="True if log search was limited before scanning all runs",
+    )

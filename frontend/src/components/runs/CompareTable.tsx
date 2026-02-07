@@ -20,6 +20,7 @@ import { useAtlasStore } from '@/store/useAtlasStore';
 import type { RunResponse, ArtifactInfo } from '@/api/types';
 import { AlertCircle, Loader2, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatDuration } from '@/lib/datetime';
 
 interface CompareTableProps {
   runIds: string[];
@@ -38,15 +39,8 @@ function formatDelta(current: number, baseline: number): { text: string; classNa
 
   return {
     text: `${sign}${formatted}`,
-    className: delta > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
+    className: delta > 0 ? 'text-status-success' : 'text-status-failure',
   };
-}
-
-/** Format duration in ms with appropriate unit */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 /** Format a value for display */
@@ -69,7 +63,7 @@ function formatDurationDelta(current: number, baseline: number): { text: string;
   return {
     text: `${delta > 0 ? '+' : ''}${formatDuration(Math.abs(delta))}`,
     // Inverted: longer duration is bad (red), shorter is good (green)
-    className: delta > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
+    className: delta > 0 ? 'text-status-failure' : 'text-status-success',
   };
 }
 
@@ -114,7 +108,7 @@ function SectionRow({ label, colSpan }: { label: string; colSpan: number }) {
     <TableRow className="bg-muted/30 hover:bg-muted/30">
       {/* Sticky label cell */}
       <TableCell
-        className="py-1.5 font-medium text-xs uppercase tracking-wide text-muted-foreground sticky left-0 z-10 bg-muted/30 !border-r !border-r-border/60"
+        className="py-1.5 font-medium text-xs uppercase tracking-wide text-brand-tertiary sticky left-0 z-10 bg-muted/30 !border-r !border-r-border/60"
       >
         {label}
       </TableCell>
@@ -219,14 +213,14 @@ export function CompareTable({ runIds }: CompareTableProps) {
                   key={run.record.run_id}
                   className={cn(
                     'min-w-[180px] align-top py-3',
-                    isBaseline && 'bg-primary/5'
+                    isBaseline && 'bg-brand-tertiary/5'
                   )}
                 >
                   <div className="space-y-1">
                     {/* Run ID link */}
                     <Link
                       to={`/runs/${run.record.run_id}`}
-                      className="font-mono text-sm text-primary hover:underline font-semibold"
+                      className="font-mono text-sm text-brand-secondary hover:underline font-semibold"
                     >
                       {run.record.run_id.slice(0, 8)}...
                     </Link>
@@ -251,11 +245,11 @@ export function CompareTable({ runIds }: CompareTableProps) {
               return (
                 <TableCell
                   key={run.record.run_id}
-                  className={cn(isBaseline && 'bg-primary/5')}
+                  className={cn(isBaseline && 'bg-brand-tertiary/5')}
                 >
                   <div className="h-6 flex items-center">
                     {isBaseline ? (
-                      <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                      <Badge variant="default" className="font-sans text-xs px-1.5 py-0">
                         <Star className="h-3 w-3 mr-0.5 fill-current" />
                         BASELINE
                       </Badge>
@@ -286,7 +280,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               return (
                 <TableCell
                   key={run.record.run_id}
-                  className={cn(isBaseline && 'bg-primary/5')}
+                  className={cn(isBaseline && 'bg-brand-tertiary/5')}
                 >
                   <StatusBadge status={run.record.status} />
                 </TableCell>
@@ -309,7 +303,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
                     return (
                       <TableCell
                         key={run.record.run_id}
-                        className={cn(isBaseline && 'bg-primary/5')}
+                        className={cn(isBaseline && 'bg-brand-tertiary/5')}
                       >
                         <ValueCell
                           value={run.params[key]}
@@ -339,7 +333,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
                     return (
                       <TableCell
                         key={run.record.run_id}
-                        className={cn(isBaseline && 'bg-primary/5')}
+                        className={cn(isBaseline && 'bg-brand-tertiary/5')}
                       >
                         <ValueCell
                           value={run.metrics[key]}
@@ -369,7 +363,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
                     return (
                       <TableCell
                         key={run.record.run_id}
-                        className={cn(isBaseline && 'bg-primary/5')}
+                        className={cn(isBaseline && 'bg-brand-tertiary/5')}
                       >
                         <ValueCell
                           value={run.derived_metrics?.[key]}
@@ -396,7 +390,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
               return (
                 <TableCell
                   key={run.record.run_id}
-                  className={cn(isBaseline && 'bg-primary/5')}
+                  className={cn(isBaseline && 'bg-brand-tertiary/5')}
                 >
                   <ValueCell
                     value={run.record.duration_ms}
@@ -428,7 +422,7 @@ export function CompareTable({ runIds }: CompareTableProps) {
                     return (
                       <TableCell
                         key={run.record.run_id}
-                        className={cn(isBaseline && 'bg-primary/5')}
+                        className={cn(isBaseline && 'bg-brand-tertiary/5')}
                       >
                         {artifact ? (
                           <Button

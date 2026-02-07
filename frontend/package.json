@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:redesign": "vite --config redesign/vite.config.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -34,6 +35,7 @@
     "react-router-dom": "^7.13.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",
+    "tinykeys": "^3.0.0",
     "zustand": "^5.0.10"
   },
   "devDependencies": {

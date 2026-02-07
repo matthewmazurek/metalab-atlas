@@ -115,31 +115,31 @@ export function ArtifactList({ runId, artifacts }: ArtifactListProps) {
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Package className="h-4 w-4" />
             Artifacts
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
+          <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
             {artifacts.map((artifact) => {
               const Icon = getArtifactIcon(artifact.kind);
               return (
                 <div
                   key={artifact.artifact_id}
-                  className="flex items-center justify-between p-3 border rounded-lg"
+                  className="flex items-center justify-between p-3 border rounded-lg min-w-0"
                 >
-                  <div className="flex items-center gap-3">
-                    <Icon className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <div className="font-medium">{artifact.name}</div>
-                      <div className="text-sm text-muted-foreground">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon className="h-5 w-5 text-muted-foreground shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{artifact.name}</div>
+                      <div className="text-sm text-muted-foreground truncate">
                         {artifact.kind} / {artifact.format} - {formatBytes(artifact.size_bytes)}
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <Button
                       variant="ghost"
                       size="sm"

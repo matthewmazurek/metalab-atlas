@@ -56,8 +56,8 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
   if (!isLoading && (isError || logs.length === 0)) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
             <ScrollText className="h-4 w-4" />
             Logs
           </CardTitle>
@@ -76,8 +76,8 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
   if (isLoading) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
             <ScrollText className="h-4 w-4" />
             Logs
           </CardTitle>
@@ -95,8 +95,8 @@ export function LogViewer({ runId, isRunning = false }: LogViewerProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium flex items-center gap-2">
           <ScrollText className="h-4 w-4" />
           Logs
           {isRunning && (

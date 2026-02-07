@@ -6,7 +6,6 @@ Provides SQL pushdown for efficient queries on large datasets (300k+ runs):
 - Runs list: Keyset pagination with efficient sorting
 - Field index: From field_catalog table or JSONB introspection
 - Aggregations: SQL-based GROUP BY with statistical functions
-- Histograms: SQL-based binning using width_bucket()
 
 Connection can be via:
 - Direct connection string: postgresql://user@host:port/db
@@ -158,7 +157,7 @@ class PostgresStoreAdapter:
     Store adapter that queries Postgres directly.
 
     Implements the StoreAdapter protocol with SQL pushdown for efficiency.
-    All heavy operations (list, filter, aggregate, histogram) are done in SQL.
+    All heavy operations (list, filter, aggregate) are done in SQL.
     """
 
     def __init__(
@@ -413,8 +412,11 @@ class PostgresStoreAdapter:
                         for ff in filter.field_filters:
                             clause, fparams = self._build_field_filter(ff)
                             if clause:
-                                # Add r. prefix for record.* columns
-                                if ff.field.startswith("record."):
+                                # Add r. prefix for record.* table columns (clause is "col op %s")
+                                # record_json paths are returned as full "r.record_json->..." and need no prefix
+                                if ff.field.startswith(
+                                    "record."
+                                ) and not clause.startswith("(r."):
                                     clause = "r." + clause
                                 where_clauses.append(clause)
                                 params.extend(fparams)
@@ -477,6 +479,22 @@ class PostgresStoreAdapter:
 
                 return runs, total
 
+    # Record fields that exist as table columns (same as metalab postgres runs table).
+    # Other record fields (tags, warnings, notes, error, provenance) live only in record_json.
+    _RECORD_TABLE_COLUMNS = frozenset(
+        {
+            "run_id",
+            "experiment_id",
+            "status",
+            "context_fingerprint",
+            "params_fingerprint",
+            "seed_fingerprint",
+            "started_at",
+            "finished_at",
+            "duration_ms",
+        }
+    )
+
     def _build_field_filter(self, ff: Any) -> tuple[str, list[Any]]:
         """Build SQL clause for a field filter."""
         field_path = ff.field
@@ -492,24 +510,40 @@ class PostgresStoreAdapter:
 
         # Map to JSONB path
         if namespace == "record":
-            col = key
-            if op == "eq":
-                return f"{col} = %s", [value]
-            elif op == "ne":
-                return f"{col} != %s", [value]
-            elif op == "lt":
-                return f"{col} < %s", [value]
-            elif op == "le":
-                return f"{col} <= %s", [value]
-            elif op == "gt":
-                return f"{col} > %s", [value]
-            elif op == "ge":
-                return f"{col} >= %s", [value]
-            elif op == "contains":
-                return f"{col}::text ILIKE %s", [f"%{value}%"]
-            elif op == "in":
-                placeholders = ", ".join(["%s"] * len(value))
-                return f"{col} IN ({placeholders})", list(value)
+            if key in self._RECORD_TABLE_COLUMNS:
+                col = key
+                if op == "eq":
+                    return f"{col} = %s", [value]
+                elif op == "ne":
+                    return f"{col} != %s", [value]
+                elif op == "lt":
+                    return f"{col} < %s", [value]
+                elif op == "le":
+                    return f"{col} <= %s", [value]
+                elif op == "gt":
+                    return f"{col} > %s", [value]
+                elif op == "ge":
+                    return f"{col} >= %s", [value]
+                elif op == "contains":
+                    return f"{col}::text ILIKE %s", [f"%{value}%"]
+                elif op == "in":
+                    placeholders = ", ".join(["%s"] * len(value))
+                    return f"{col} IN ({placeholders})", list(value)
+            else:
+                # Field lives in record_json (e.g. tags, warnings, notes, error, provenance)
+                # Return full expression with r. so caller does not prepend again
+                jsonb_path = "(r.record_json->'" + key.replace("'", "''") + "')::text"
+                if op == "eq":
+                    return f"{jsonb_path} = %s", [str(value)]
+                elif op == "ne":
+                    return f"{jsonb_path} != %s", [str(value)]
+                elif op == "contains":
+                    return f"{jsonb_path} ILIKE %s", [f"%{value}%"]
+                elif op == "in":
+                    placeholders = ", ".join(["%s"] * len(value))
+                    return f"{jsonb_path} IN ({placeholders})", [str(v) for v in value]
+                # lt/le/gt/ge not meaningful for JSONB tags/warnings
+                return "", []
         elif namespace == "params":
             jsonb_path = f"record_json->'params_resolved'->>'{key}'"
         elif namespace == "metrics":
@@ -522,8 +556,14 @@ class PostgresStoreAdapter:
 
         # JSONB comparison
         if op == "eq":
+            if isinstance(value, (int, float)):
+                # Use numeric cast to avoid int/float text mismatch
+                # (e.g., JSON -80 extracts as '-80' but str(-80.0) == '-80.0')
+                return f"({jsonb_path})::numeric = %s", [value]
             return f"{jsonb_path} = %s", [str(value)]
         elif op == "ne":
+            if isinstance(value, (int, float)):
+                return f"({jsonb_path})::numeric != %s", [value]
             return f"{jsonb_path} != %s", [str(value)]
         elif op == "lt":
             return f"({jsonb_path})::float < %s", [float(value)]
@@ -669,9 +709,11 @@ class PostgresStoreAdapter:
         filter: FilterSpec | None,
     ) -> FieldIndex:
         """Get field index from pre-computed catalog table."""
+        experiment_id = filter.experiment_id if filter else None
+
         # Determine which schemas to query
-        if filter and filter.experiment_id:
-            schema = self._get_schema_for_experiment(filter.experiment_id)
+        if experiment_id:
+            schema = self._get_schema_for_experiment(experiment_id)
             schemas = [schema] if schema else []
         else:
             schemas = self._get_all_schemas()
@@ -734,7 +776,14 @@ class PostgresStoreAdapter:
                 elif namespace == "record":
                     record_fields[field_name] = info
 
-            cur.execute(f"SELECT COUNT(*) FROM {schema}.runs")
+            # Count runs filtered by experiment_id when specified
+            if experiment_id:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {schema}.runs WHERE experiment_id = %s",
+                    [experiment_id],
+                )
+            else:
+                cur.execute(f"SELECT COUNT(*) FROM {schema}.runs")
             run_count += cur.fetchone()[0]
 
         return FieldIndex(
@@ -754,6 +803,7 @@ class PostgresStoreAdapter:
     ) -> FieldIndex:
         """Introspect fields from JSONB (slower, for stores without catalog)."""
         scope = self._scope_for_experiment(filter.experiment_id if filter else None)
+        experiment_id = filter.experiment_id if filter else None
 
         if scope.is_empty:
             return FieldIndex(
@@ -766,20 +816,30 @@ class PostgresStoreAdapter:
                 record_fields={},
             )
 
+        # Build optional WHERE clause for experiment_id filtering within schema
+        if experiment_id:
+            where_clause = "WHERE experiment_id = %s"
+            where_params: list[Any] = [experiment_id]
+        else:
+            where_clause = ""
+            where_params = []
+
         params_stats: dict[str, dict] = {}
         metrics_stats: dict[str, dict] = {}
         derived_stats: dict[str, dict] = {}
         run_count = 0
 
         for schema in scope.schemas:
-            # Sample runs from this schema
+            # Sample runs from this schema (filtered by experiment_id)
             cur.execute(
                 f"""
                 SELECT record_json
                 FROM {schema}.runs
+                {where_clause}
                 ORDER BY started_at DESC
                 LIMIT 1000
-            """
+            """,
+                where_params,
             )
 
             for (record_json,) in cur.fetchall():
@@ -801,14 +861,27 @@ class PostgresStoreAdapter:
                         metrics_stats[key] = self._init_stats(value)
                     self._update_stats(metrics_stats[key], value)
 
-            # Sample derived metrics from derived table
-            cur.execute(
-                f"""
-                SELECT derived_json
-                FROM {schema}.derived
-                LIMIT 1000
-            """
-            )
+            # Sample derived metrics from derived table (filtered by experiment_id
+            # via JOIN on runs to respect the experiment scope)
+            if experiment_id:
+                cur.execute(
+                    f"""
+                    SELECT d.derived_json
+                    FROM {schema}.derived d
+                    JOIN {schema}.runs r ON d.run_id = r.run_id
+                    WHERE r.experiment_id = %s
+                    LIMIT 1000
+                """,
+                    [experiment_id],
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT derived_json
+                    FROM {schema}.derived
+                    LIMIT 1000
+                """
+                )
 
             for (derived_json,) in cur.fetchall():
                 data = (
@@ -821,7 +894,10 @@ class PostgresStoreAdapter:
                         derived_stats[key] = self._init_stats(value)
                     self._update_stats(derived_stats[key], value)
 
-            cur.execute(f"SELECT COUNT(*) FROM {schema}.runs")
+            cur.execute(
+                f"SELECT COUNT(*) FROM {schema}.runs {where_clause}",
+                where_params,
+            )
             run_count += cur.fetchone()[0]
 
         return FieldIndex(
@@ -1465,8 +1541,12 @@ class PostgresStoreAdapter:
                             clause, fparams = self._build_field_filter(ff)
                             if clause:
                                 # Add table alias for record.* columns when joining with derived
-                                if has_derived and ff.field.startswith("record."):
-                                    # The clause starts with the column name, add 'r.' prefix
+                                # record_json paths already include "r." in the clause
+                                if (
+                                    has_derived
+                                    and ff.field.startswith("record.")
+                                    and not clause.startswith("(r.")
+                                ):
                                     clause = "r." + clause
                                 where_clauses.append(clause)
                                 params.extend(fparams)

@@ -133,25 +133,25 @@ export function SlurmStatusBadge({ experimentId, compact = false }: SlurmStatusB
         count={status.running}
         label="running"
         icon={Play}
-        colorClass="bg-cyan-100 text-cyan-900 dark:bg-cyan-950/30 dark:text-cyan-200"
+        colorClass="bg-status-running/15 text-status-running dark:bg-status-running/25 dark:text-status-running"
       />
       <CountBadge
         count={status.pending}
         label="pending"
         icon={Clock}
-        colorClass="bg-violet-100 text-violet-900 dark:bg-violet-950/30 dark:text-violet-200"
+        colorClass="bg-status-warning/15 text-status-warning dark:bg-status-warning/25 dark:text-status-warning"
       />
       <CountBadge
         count={status.completed}
         label="completed"
         icon={CheckCircle}
-        colorClass="bg-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
+        colorClass="bg-status-success/15 text-status-success dark:bg-status-success/25 dark:text-status-success"
       />
       <CountBadge
         count={status.failed + status.cancelled + status.timeout + status.oom}
         label="failed/cancelled"
         icon={XCircle}
-        colorClass="bg-rose-100 text-rose-900 dark:bg-rose-950/30 dark:text-rose-200"
+        colorClass="bg-status-failure/15 text-status-failure dark:bg-status-failure/25 dark:text-status-failure"
       />
       {status.other > 0 && (
         <CountBadge

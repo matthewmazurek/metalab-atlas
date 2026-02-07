@@ -2,27 +2,28 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * Typography system for consistent heading styles across the Atlas UI.
+ * Atlas typography: Plus Jakarta Sans for all UI and body; IBM Plex Mono for IDs/code only.
  *
- * Hierarchy:
- * - PageTitle (H1): Main page titles - large, bold
- * - SectionTitle (H2): Card titles, major sections - semibold
- * - PanelTitle (H3): Sidebar/panel headers - medium weight, smaller
- * - SectionLabel: Small uppercase labels for subsections
+ * Scale:
+ * - Page title: 4xl bold (main page heading)
+ * - Section: 2xl semibold (major sections)
+ * - Card/panel title: lg semibold
+ * - Subsection: base semibold
+ * - Body: base normal (default)
+ * - Body secondary: sm, muted
+ * - Caption/label: sm medium
+ * - Overline: xs semibold uppercase tracking-wide muted
  */
 
 interface TypographyProps extends React.HTMLAttributes<HTMLElement> {
   children: React.ReactNode;
 }
 
-/**
- * Page-level title (H1)
- * Use for main page headings like "Runs", "Compare Runs", etc.
- */
+/** Page-level title (H1). Use for main page headings. */
 export function PageTitle({ className, children, ...props }: TypographyProps) {
   return (
     <h1
-      className={cn('text-2xl font-bold tracking-tight', className)}
+      className={cn('font-sans text-4xl font-bold tracking-tight text-foreground', className)}
       {...props}
     >
       {children}
@@ -30,15 +31,11 @@ export function PageTitle({ className, children, ...props }: TypographyProps) {
   );
 }
 
-/**
- * Section title (H2)
- * Use for card headers, major content sections.
- * Note: For cards, prefer using CardTitle which has this style built-in.
- */
+/** Section title (H2). Card headers, major content sections. */
 export function SectionTitle({ className, children, ...props }: TypographyProps) {
   return (
     <h2
-      className={cn('text-lg font-semibold', className)}
+      className={cn('font-sans text-2xl font-semibold tracking-tight text-foreground', className)}
       {...props}
     >
       {children}
@@ -46,14 +43,11 @@ export function SectionTitle({ className, children, ...props }: TypographyProps)
   );
 }
 
-/**
- * Panel title (H3)
- * Use for sidebar panels, collapsible sections, secondary headers.
- */
+/** Panel title (H3). Sidebar panels, collapsible sections. */
 export function PanelTitle({ className, children, ...props }: TypographyProps) {
   return (
     <h3
-      className={cn('text-sm font-semibold', className)}
+      className={cn('font-sans text-base font-semibold text-foreground', className)}
       {...props}
     >
       {children}
@@ -61,21 +55,35 @@ export function PanelTitle({ className, children, ...props }: TypographyProps) {
   );
 }
 
-/**
- * Section label
- * Use for small subsection labels within panels/cards (e.g., "Overview", "Parameters").
- * Uppercase, muted, with tracking for readability.
- */
+/** Small subsection label. Uppercase, muted, tracking. */
 export function SectionLabel({ className, children, ...props }: TypographyProps) {
   return (
     <div
       className={cn(
-        'text-xs font-medium text-muted-foreground uppercase tracking-wide',
+        'font-sans text-xs font-semibold uppercase tracking-wide text-muted-foreground',
         className
       )}
       {...props}
     >
       {children}
     </div>
+  );
+}
+
+/** Body text, secondary (muted). */
+export function BodySecondary({ className, children, ...props }: TypographyProps) {
+  return (
+    <p className={cn('font-sans text-sm font-normal text-muted-foreground', className)} {...props}>
+      {children}
+    </p>
+  );
+}
+
+/** Technical content: IDs, hashes, code. Use sparingly. */
+export function Mono({ className, children, ...props }: TypographyProps) {
+  return (
+    <span className={cn('font-mono text-sm font-normal', className)} {...props}>
+      {children}
+    </span>
   );
 }

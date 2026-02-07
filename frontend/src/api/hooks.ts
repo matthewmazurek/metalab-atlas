@@ -2,7 +2,8 @@
  * React Query hooks for MetaLab Atlas API.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import {
   fetchRuns,
   fetchRun,
@@ -13,13 +14,15 @@ import {
   fetchFields,
   fetchExperiments,
   fetchFieldValues,
-  fetchHistogram,
   fetchExperimentManifests,
   fetchLatestManifest,
+  fetchManifest,
   fetchSlurmStatus,
   fetchStatusCounts,
+  fetchSearch,
+  fetchSearchLogs,
 } from './client';
-import type { FieldValuesRequest, FilterSpec, HistogramRequest } from './types';
+import type { FieldValuesRequest, FilterSpec } from './types';
 
 // Auto-refresh interval for list views (30 seconds)
 const REFETCH_INTERVAL = 30 * 1000;
@@ -45,15 +48,20 @@ export const queryKeys = {
   fields: (experimentId?: string) => ['fields', experimentId] as const,
   experiments: () => ['experiments'] as const,
   fieldValues: (request: FieldValuesRequest) => ['fieldValues', request] as const,
-  histogram: (request: HistogramRequest) => ['histogram', request] as const,
   experimentManifests: (experimentId: string) =>
     ['experimentManifests', experimentId] as const,
   latestManifest: (experimentId: string) =>
     ['latestManifest', experimentId] as const,
+  manifest: (experimentId: string, timestamp: string) =>
+    ['manifest', experimentId, timestamp] as const,
   slurmStatus: (experimentId: string) =>
     ['slurmStatus', experimentId] as const,
   statusCounts: (experimentId: string) =>
     ['statusCounts', experimentId] as const,
+  search: (query: string, limit?: number) =>
+    ['search', query, limit] as const,
+  searchLogs: (query: string, limit?: number) =>
+    ['searchLogs', query, limit] as const,
 };
 
 // Hooks
@@ -146,21 +154,6 @@ export function useFieldValues(request: FieldValuesRequest, enabled = true) {
   });
 }
 
-export function useHistogram(request: HistogramRequest | null, enabled = true, isInProgress = false) {
-  // Serialize filter for stable query key
-  const filterKey = request?.filter ? JSON.stringify(request.filter) : 'none';
-
-  return useQuery({
-    queryKey: ['histogram', request?.field, request?.bin_count, filterKey],
-    queryFn: () => fetchHistogram(request!),
-    enabled: enabled && !!request?.field,
-    // Refresh faster when experiment is in progress, otherwise keep stable
-    staleTime: isInProgress ? 0 : Infinity,
-    refetchInterval: isInProgress ? ACTIVE_REFETCH_INTERVAL : false,
-    refetchOnWindowFocus: isInProgress,
-  });
-}
-
 export function useExperimentManifests(experimentId: string) {
   return useQuery({
     queryKey: queryKeys.experimentManifests(experimentId),
@@ -174,6 +167,14 @@ export function useLatestManifest(experimentId: string) {
     queryKey: queryKeys.latestManifest(experimentId),
     queryFn: () => fetchLatestManifest(experimentId),
     enabled: !!experimentId,
+  });
+}
+
+export function useManifest(experimentId: string, timestamp: string) {
+  return useQuery({
+    queryKey: queryKeys.manifest(experimentId, timestamp),
+    queryFn: () => fetchManifest(experimentId, timestamp),
+    enabled: !!experimentId && !!timestamp,
   });
 }
 
@@ -197,5 +198,56 @@ export function useStatusCounts(experimentId: string) {
     // Auto-poll faster when experiment has running runs
     refetchInterval: (query) =>
       (query.state.data?.running ?? 0) > 0 ? ACTIVE_REFETCH_INTERVAL : REFETCH_INTERVAL,
+  });
+}
+
+export type StatusCountsMap = Map<
+  string,
+  { successCount: number; failedCount: number; runningCount: number }
+>;
+
+export function useStatusCountsBatch(experimentIds: string[]): { statusMap: StatusCountsMap } {
+  const queries = useQueries({
+    queries: experimentIds.map((id) => ({
+      queryKey: queryKeys.statusCounts(id),
+      queryFn: () => fetchStatusCounts(id),
+      enabled: !!id,
+      refetchInterval: REFETCH_INTERVAL,
+    })),
+  });
+
+  const statusMap = useMemo(() => {
+    const map: StatusCountsMap = new Map();
+    experimentIds.forEach((id, index) => {
+      const data = queries[index]?.data;
+      map.set(id, {
+        successCount: data?.success ?? 0,
+        failedCount: data?.failed ?? 0,
+        runningCount: data?.running ?? 0,
+      });
+    });
+    return map;
+  }, [experimentIds, queries]);
+
+  return { statusMap };
+}
+
+export function useSearch(query: string, limit = 5) {
+  return useQuery({
+    queryKey: queryKeys.search(query, limit),
+    queryFn: () => fetchSearch(query, limit),
+    enabled: query.trim().length >= 2,
+    placeholderData: (previousData) => previousData,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSearchLogs(query: string, limit = 5) {
+  return useQuery({
+    queryKey: queryKeys.searchLogs(query, limit),
+    queryFn: () => fetchSearchLogs(query, limit),
+    enabled: query.trim().length >= 2,
+    placeholderData: (previousData) => previousData,
+    staleTime: 60 * 1000,
   });
 }

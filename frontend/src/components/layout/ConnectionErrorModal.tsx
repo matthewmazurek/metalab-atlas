@@ -38,13 +38,13 @@ export function ConnectionErrorModal() {
           <div className="rounded-full bg-destructive/10 p-4 mb-2">
             <ServerOff className="h-10 w-10 text-destructive" />
           </div>
-          <DialogTitle className="text-xl">Unable to connect to server</DialogTitle>
-          <DialogDescription className="text-center">
+          <DialogTitle className="font-sans text-xl font-semibold">Unable to connect to server</DialogTitle>
+          <DialogDescription className="text-center font-sans text-sm text-muted-foreground">
             The Atlas backend server is not responding. Please make sure the server is running and try again.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
+        <div className="bg-muted/50 rounded-lg p-4 font-sans text-sm text-muted-foreground">
           <p className="font-medium text-foreground mb-1">To start the server:</p>
           <code className="block bg-background rounded px-2 py-1 font-mono text-xs">
             metalab-atlas serve --store ./path/to/store

@@ -16,13 +16,13 @@ interface BreadcrumbProps {
 export function Breadcrumb({ items, className }: BreadcrumbProps) {
   return (
     <nav
-      className={cn('flex items-center gap-1 text-sm', className)}
+      className={cn('flex items-center gap-1 font-sans text-sm', className)}
       aria-label="Breadcrumb"
     >
       {items.map((item, index) => (
         <React.Fragment key={index}>
           {index > 0 && (
-            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+            <ChevronRight className="h-4 w-4 text-brand-tertiary shrink-0" />
           )}
           <BreadcrumbSegment item={item} isLast={index === items.length - 1} />
         </React.Fragment>
@@ -54,7 +54,7 @@ function BreadcrumbSegment({ item, isLast }: BreadcrumbSegmentProps) {
     <span
       className={cn(
         'truncate max-w-[200px]',
-        isLast ? 'text-foreground font-medium' : 'text-muted-foreground'
+        isLast ? 'text-brand-tertiary font-medium' : 'text-muted-foreground'
       )}
     >
       {item.label}

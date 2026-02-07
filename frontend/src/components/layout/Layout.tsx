@@ -1,9 +1,15 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { BarChart3, Beaker, GitCompare, LayoutList, Moon, Sun } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { BarChart3, Beaker, GitCompare, Keyboard, LayoutList, Search, Settings, Moon, Sun } from 'lucide-react';
 import { useAtlasStore } from '@/store/useAtlasStore';
+import { applyAccentTheme } from '@/lib/accent-themes';
+import { ACCENT_THEMES } from '@/lib/accent-themes';
 import { ConnectionErrorModal } from './ConnectionErrorModal';
+import { SearchModal } from '@/components/search/SearchModal';
+import { ShortcutHelpModal } from './ShortcutHelpModal';
+import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/experiments', label: 'Experiments', icon: Beaker },
@@ -12,26 +18,21 @@ const navItems = [
   { path: '/compare', label: 'Compare', icon: GitCompare },
 ];
 
-// Subtle, modern hero gradients (light + dark) inspired by the provided references.
-const HERO_GRADIENT_LIGHT = [
-  "radial-gradient(900px circle at 20% 15%, rgba(99, 102, 241, 0.14), transparent 60%)",
-  "radial-gradient(800px circle at 80% 25%, rgba(236, 72, 153, 0.11), transparent 62%)",
-  "radial-gradient(900px circle at 60% 95%, rgba(14, 165, 233, 0.09), transparent 60%)",
-  "linear-gradient(180deg, rgba(252, 252, 255, 1) 0%, rgba(244, 246, 252, 1) 45%, rgba(238, 236, 248, 1) 100%)",
-].join(', ');
-
-const HERO_GRADIENT_DARK = [
-  "radial-gradient(900px circle at 20% 18%, rgba(56, 189, 248, 0.16), transparent 60%)",
-  "radial-gradient(850px circle at 78% 24%, rgba(168, 85, 247, 0.18), transparent 62%)",
-  "radial-gradient(950px circle at 60% 95%, rgba(244, 63, 94, 0.12), transparent 60%)",
-  "linear-gradient(180deg, rgba(10, 16, 31, 1) 0%, rgba(15, 23, 42, 1) 50%, rgba(28, 20, 48, 1) 100%)",
-].join(', ');
-
 export function Layout() {
   const location = useLocation();
-  const { darkMode, toggleDarkMode } = useAtlasStore();
+  const { darkMode, accentTheme, setAccentTheme, toggleDarkMode } = useAtlasStore();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
 
-  // Apply dark class to <html> element so CSS variables cascade properly
+  const handleToggleSearch = useCallback(() => setSearchOpen((o) => !o), []);
+  const handleShowHelp = useCallback(() => setShortcutHelpOpen(true), []);
+
+  useGlobalShortcuts({
+    onToggleSearch: handleToggleSearch,
+    onShowHelp: handleShowHelp,
+  });
+
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -40,96 +41,146 @@ export function Layout() {
     }
   }, [darkMode]);
 
+  useEffect(() => {
+    applyAccentTheme(accentTheme, darkMode);
+  }, [accentTheme, darkMode]);
+
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
-      {/* Header - fixed at top */}
-      <header className="shrink-0 border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60 relative z-20">
-        <div className="flex h-14 items-center px-4 gap-4">
-          <Link to="/" className="flex items-center gap-2 font-semibold">
-            <BarChart3 className="h-5 w-5" />
-            <span>MetaLab Atlas</span>
-          </Link>
-
-          <nav className="flex items-center gap-1 ml-6">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
-              return (
-                <Link key={item.path} to={item.path}>
-                  <Button
-                    variant={isActive ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className={[
-                      'gap-2 cursor-pointer transition-colors',
-                      // Light mode: soft “white glass” hover/active instead of grey
-                      isActive
-                        ? 'bg-card/80 hover:bg-card/95 shadow-sm'
-                        : 'hover:bg-card/70',
-                      // Dark mode: keep subtle, slightly muted hover/active
-                      isActive
-                        ? 'dark:bg-accent/50 dark:hover:bg-accent/60'
-                        : 'dark:hover:bg-accent/50',
-                    ].join(' ')}
+    <div className="relative flex min-h-screen flex-col bg-background text-foreground">
+      {/* Top bar only - no sidebar */}
+      <header className="relative z-10 flex h-14 shrink-0 items-center border-b border-border bg-card/95 backdrop-blur-sm px-6 transition-colors duration-200">
+        <Link
+          to="/"
+          className="flex items-center gap-2 font-sans text-base font-bold tracking-tight text-foreground transition-opacity duration-200 hover:opacity-80"
+        >
+          <BarChart3 className="h-5 w-5" />
+          <span>metalab ATLAS</span>
+        </Link>
+        <nav className="ml-10 flex items-center gap-1">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  'flex items-center gap-2 rounded-md px-3 py-2 font-sans text-sm font-medium transition-all duration-200',
+                  isActive
+                    ? 'bg-brand text-brand-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="flex items-center gap-1.5 rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
+            aria-label="Search"
+          >
+            <Search className="h-4 w-4" />
+            <kbd className="pointer-events-none hidden h-5 select-none items-center rounded border border-border bg-muted/50 px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+              ⌘K
+            </kbd>
+          </button>
+          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
+                aria-label="Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-2">
+              <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Accent theme
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {ACCENT_THEMES.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => {
+                      setAccentTheme(preset.id);
+                      setSettingsOpen(false);
+                    }}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors',
+                      accentTheme === preset.id
+                        ? 'bg-brand/10 text-brand'
+                        : 'text-foreground hover:bg-muted'
+                    )}
                   >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </Button>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="ml-auto">
-            <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
-              {darkMode ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
+                    <span className="flex shrink-0 gap-0.5" aria-hidden>
+                      <span
+                        className="h-4 w-3 rounded-sm border border-border"
+                        style={{ backgroundColor: preset.brand }}
+                      />
+                      <span
+                        className="h-4 w-3 rounded-sm border border-border"
+                        style={{ backgroundColor: preset.brandSecondary }}
+                      />
+                      <span
+                        className="h-4 w-3 rounded-sm border border-border"
+                        style={{ backgroundColor: preset.brandTertiary }}
+                      />
+                    </span>
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <button
+            type="button"
+            className="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
+            onClick={() => setShortcutHelpOpen(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded-md p-2 text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
+            onClick={toggleDarkMode}
+            aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
         </div>
       </header>
 
-      {/* Main content - scrollable */}
-      <main className="flex-1 overflow-y-auto relative">
-        {/* Hero background - behind header while scrolling */}
+      <main className="relative z-10 flex-1">
         <div
-          className="fixed top-0 left-0 right-0 h-[360px] pointer-events-none z-0"
-          aria-hidden="true"
+          key={location.pathname}
+          className="container mx-auto animate-page-in px-6 py-8"
         >
-          {/* Light / dark gradient hero background */}
-          <div
-            className="absolute inset-0 dark:hidden"
-            style={{
-              backgroundImage: HERO_GRADIENT_LIGHT,
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'center',
-              backgroundSize: 'cover',
-            }}
-          />
-          <div
-            className="absolute inset-0 hidden dark:block"
-            style={{
-              backgroundImage: HERO_GRADIENT_DARK,
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'center',
-              backgroundSize: 'cover',
-            }}
-          />
-
-          {/* Fade out (prevents harsh cutoff into page background) */}
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
-        </div>
-
-        {/* Page content */}
-        <div className="container mx-auto py-6 px-4 relative z-10">
           <Outlet />
         </div>
       </main>
 
-      {/* Global connection error modal */}
+      <footer className="relative z-10 shrink-0">
+        <div className="container mx-auto px-6">
+          <div className="border-t border-border pt-4 pb-3">
+            <p className="font-sans text-center text-[11px] text-muted-foreground">
+              metalab ATLAS · The experiment runner for reproducible science
+            </p>
+          </div>
+        </div>
+      </footer>
+
       <ConnectionErrorModal />
+      <SearchModal open={searchOpen} onOpenChange={setSearchOpen} />
+      <ShortcutHelpModal open={shortcutHelpOpen} onOpenChange={setShortcutHelpOpen} />
     </div>
   );
 }

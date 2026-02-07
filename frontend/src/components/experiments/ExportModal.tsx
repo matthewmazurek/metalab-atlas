@@ -130,7 +130,7 @@ export function ExportModal({ experimentId, open, onOpenChange }: ExportModalPro
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -161,11 +161,11 @@ function FormatButton({ selected, onClick, icon, label, description }: FormatBut
       className={cn(
         'flex flex-col items-center justify-center gap-1 p-3 rounded-md border-2 transition-colors',
         selected
-          ? 'border-primary bg-primary/5'
+          ? 'border-brand bg-brand/5'
           : 'border-border hover:border-muted-foreground/50 hover:bg-muted/50'
       )}
     >
-      <div className={cn('flex items-center gap-2', selected ? 'text-primary' : 'text-muted-foreground')}>
+      <div className={cn('flex items-center gap-2', selected ? 'text-brand' : 'text-muted-foreground')}>
         {icon}
         <span className="font-medium">{label}</span>
       </div>

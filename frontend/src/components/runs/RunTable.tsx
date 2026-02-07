@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useTableNavigation } from '@/hooks/useTableNavigation';
 import { useRuns, useFields } from '@/api/hooks';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
@@ -14,10 +14,11 @@ import {
 import { StatusBadge } from './StatusBadge';
 import { ColumnHeader, type SortDirection } from './ColumnHeader';
 import { useAtlasStore } from '@/store/useAtlasStore';
-import type { RunResponse, FieldInfo, FilterSpec, FieldFilter } from '@/api/types';
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import type { RunResponse, FieldInfo } from '@/api/types';
+import { PaginationBar } from '@/components/ui/PaginationBar';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/datetime';
+import { formatRelativeTime, formatDuration } from '@/lib/datetime';
 
 const PAGE_SIZE = 25;
 
@@ -32,15 +33,6 @@ interface ColumnDef {
   stickyOffset?: number; // Left offset for sticky positioning
   render: (run: RunResponse) => React.ReactNode;
   getValue?: (run: RunResponse) => string;
-}
-
-/**
- * Format duration in milliseconds to human readable string
- */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
 
 /**
@@ -60,34 +52,16 @@ function formatValue(value: unknown): string {
 interface RunTableProps {
   onVisibleRunIdsChange?: (runIds: string[]) => void;
   onTotalChange?: (total: number) => void;
-  /** URL-based field filters (e.g., from plot click-through) - kept separate from global store */
-  urlFieldFilters?: FieldFilter[];
 }
 
-export function RunTable({ onVisibleRunIdsChange, onTotalChange, urlFieldFilters = [] }: RunTableProps) {
-  // Compute merged filter *outside* the paged component, and key the paged component
-  // by this filter so pagination resets without a setState-in-effect.
-  const { filter, columnFilters, getFieldFilters } = useAtlasStore();
-
-  // Note: `columnFilters` is read to ensure we re-render when filters change,
-  // but we avoid threading it through hook deps (eslint false-positive).
-  void columnFilters;
-
-  const columnFieldFilters = getFieldFilters();
-  const allFieldFilters = [...urlFieldFilters, ...columnFieldFilters];
-  const mergedFilter = allFieldFilters.length === 0
-    ? filter
-    : {
-      ...filter,
-      field_filters: [...(filter.field_filters || []), ...allFieldFilters],
-    };
-
-  const filterKey = JSON.stringify(mergedFilter);
+export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps) {
+  // Use filter directly - no more merging of multiple filter sources
+  const { filter } = useAtlasStore();
+  const filterKey = JSON.stringify(filter);
 
   return (
     <RunTableImpl
       key={filterKey}
-      mergedFilter={mergedFilter}
       onVisibleRunIdsChange={onVisibleRunIdsChange}
       onTotalChange={onTotalChange}
     />
@@ -95,11 +69,9 @@ export function RunTable({ onVisibleRunIdsChange, onTotalChange, urlFieldFilters
 }
 
 function RunTableImpl({
-  mergedFilter,
   onVisibleRunIdsChange,
   onTotalChange,
 }: {
-  mergedFilter: FilterSpec;
   onVisibleRunIdsChange?: (runIds: string[]) => void;
   onTotalChange?: (total: number) => void;
 }) {
@@ -107,13 +79,13 @@ function RunTableImpl({
   const {
     filter,
     tableSort,
-    columnFilters,
     selectedRunIds,
     selectionFilter,
     toggleRunSelection,
     setTableSort,
-    setColumnFilter,
-    setColumnFilterValues,
+    addFieldFilter,
+    setFieldFilterValues,
+    getFieldFilterValues,
     visibleColumns: visibleColumnsMap,
     setVisibleColumns,
   } = useAtlasStore();
@@ -160,13 +132,14 @@ function RunTableImpl({
   }, [storedVisibleColumns, fieldsData, experimentId, filter.experiment_id, setVisibleColumns]);
 
   const { data, isLoading } = useRuns({
-    filter: mergedFilter,
+    filter,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
     sort_by: tableSort?.field || 'record.started_at',
     sort_order: tableSort?.order || 'desc',
   });
 
+  const navigate = useNavigate();
   const runs = useMemo(() => data?.runs ?? [], [data?.runs]);
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -186,6 +159,36 @@ function RunTableImpl({
     }
   }, [total, onTotalChange]);
 
+  // Keyboard table navigation
+  const handleOpenRow = useCallback(
+    (index: number) => {
+      const run = runs[index];
+      if (run) {
+        navigate(`/runs/${run.record.run_id}`);
+      }
+    },
+    [runs, navigate]
+  );
+
+  const handleSelectRow = useCallback(
+    (index: number) => {
+      const run = runs[index];
+      if (run) {
+        toggleRunSelection(run.record.run_id);
+      }
+    },
+    [runs, toggleRunSelection]
+  );
+
+  const { focusedIndex, tableBodyRef } = useTableNavigation({
+    rowCount: runs.length,
+    onOpen: handleOpenRow,
+    onSelect: handleSelectRow,
+    page,
+    totalPages,
+    onPageChange: setPage,
+  });
+
   // Build column definitions dynamically
   const columns: ColumnDef[] = useMemo(() => {
     // Fixed columns (always shown)
@@ -201,7 +204,7 @@ function RunTableImpl({
         render: (run) => (
           <Link
             to={`/runs/${run.record.run_id}`}
-            className="font-mono text-sm text-primary hover:underline"
+            className="font-mono text-sm text-brand-secondary hover:underline"
           >
             {run.record.run_id.slice(0, 8)}...
           </Link>
@@ -356,14 +359,19 @@ function RunTableImpl({
   };
 
   // Get filter value for a column (text contains filter)
-  const getFilterValue = (columnId: string): string => {
-    return columnFilters.find((cf) => cf.columnId === columnId)?.value || '';
-  };
+  // Now reads from filter.field_filters
+  const getFilterValue = useCallback((field: string): string => {
+    const fieldFilter = filter.field_filters?.find(
+      (f) => f.field === field && f.op === 'contains'
+    );
+    return fieldFilter ? String(fieldFilter.value) : '';
+  }, [filter.field_filters]);
 
   // Get selected values for a column (discrete filter)
-  const getSelectedValues = (columnId: string): string[] => {
-    return columnFilters.find((cf) => cf.columnId === columnId)?.values || [];
-  };
+  // Now uses getFieldFilterValues from store
+  const getSelectedValues = useCallback((field: string): string[] => {
+    return getFieldFilterValues(field);
+  }, [getFieldFilterValues]);
 
   // Get field info for a column to determine if it has discrete values
   const getFieldInfo = (field: string): FieldInfo | undefined => {
@@ -402,18 +410,24 @@ function RunTableImpl({
   };
 
   // Handle filter change (text contains)
-  const handleFilter = (columnId: string, field: string, value: string) => {
-    setColumnFilter(columnId, field, value);
+  const handleFilter = useCallback((field: string, value: string) => {
+    if (value) {
+      addFieldFilter({ field, op: 'contains', value });
+    } else {
+      // Remove the filter by setting empty values triggers removal
+      const { removeFieldFilter } = useAtlasStore.getState();
+      removeFieldFilter(field);
+    }
     setPage(0);
-  };
+  }, [addFieldFilter]);
 
   // Handle filter values change (discrete multi-select)
-  const handleFilterValues = (columnId: string, field: string, values: string[]) => {
-    setColumnFilterValues(columnId, field, values);
+  const handleFilterValues = useCallback((field: string, values: string[]) => {
+    setFieldFilterValues(field, values);
     setPage(0);
-  };
+  }, [setFieldFilterValues]);
 
-  const hasActiveFilters = columnFilters.length > 0;
+  const hasActiveFilters = (filter.field_filters && filter.field_filters.length > 0) ?? false;
 
   if (isLoading) {
     return (
@@ -454,21 +468,19 @@ function RunTableImpl({
                       sortable={col.sortable}
                       filterable={col.filterable}
                       sortDirection={getSortDirection(col.field)}
-                      filterValue={getFilterValue(col.id)}
+                      filterValue={getFilterValue(col.field)}
                       onSort={(dir) => handleSort(col.field, dir)}
-                      onFilter={(value) => handleFilter(col.id, col.field, value)}
+                      onFilter={(value) => handleFilter(col.field, value)}
                       discreteValues={fieldInfo?.values}
-                      selectedValues={getSelectedValues(col.id)}
-                      onFilterValues={(values) =>
-                        handleFilterValues(col.id, col.field, values)
-                      }
+                      selectedValues={getSelectedValues(col.field)}
+                      onFilterValues={(values) => handleFilterValues(col.field, values)}
                     />
                   </TableHead>
                 );
               })}
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody ref={tableBodyRef}>
             {runs.length === 0 ? (
               <TableRow>
                 <TableCell
@@ -484,79 +496,63 @@ function RunTableImpl({
                 </TableCell>
               </TableRow>
             ) : (
-              runs.map((run) => (
-                <TableRow
-                  key={run.record.run_id}
-                  data-state={
-                    isRunSelected(run.record.run_id)
-                      ? 'selected'
-                      : undefined
-                  }
-                >
-                  {/* Checkbox - sticky */}
-                  <TableCell
-                    className={cn(
-                      'align-middle bg-card',
-                      'sticky left-0 z-10'
-                    )}
+              runs.map((run, rowIdx) => {
+                const isFocused = rowIdx === focusedIndex;
+                const isSelected = isRunSelected(run.record.run_id);
+                const rowState = isFocused ? 'focused' : isSelected ? 'selected' : undefined;
+                // Sticky cells need an explicit background so content doesn't
+                // show through when scrolling horizontally.  Mirror the row
+                // state so focus/selection colours are visible.
+                const stickyBg = isFocused
+                  ? 'bg-brand/5'
+                  : isSelected
+                    ? 'bg-muted/70'
+                    : 'bg-card';
+                return (
+                  <TableRow
+                    key={run.record.run_id}
+                    data-state={rowState}
                   >
-                    <Checkbox
-                      checked={isRunSelected(run.record.run_id)}
-                      onCheckedChange={() => toggleRunSelection(run.record.run_id)}
-                    />
-                  </TableCell>
-                  {columns.map((col) => (
+                    {/* Checkbox - sticky */}
                     <TableCell
-                      key={col.id}
                       className={cn(
-                        'align-middle bg-card',
-                        col.sticky && 'sticky z-10',
+                        'align-middle',
+                        'sticky left-0 z-10',
+                        stickyBg,
                       )}
-                      style={col.sticky ? { left: col.stickyOffset } : undefined}
                     >
-                      {col.render(run)}
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleRunSelection(run.record.run_id)}
+                      />
                     </TableCell>
-                  ))}
-                </TableRow>
-              ))
+                    {columns.map((col) => (
+                      <TableCell
+                        key={col.id}
+                        className={cn(
+                          'align-middle',
+                          col.sticky ? `sticky z-10 ${stickyBg}` : '',
+                        )}
+                        style={col.sticky ? { left: col.stickyOffset } : undefined}
+                      >
+                        {col.render(run)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {total > 0 ? (
-            <>
-              Showing {page * PAGE_SIZE + 1}-
-              {Math.min((page + 1) * PAGE_SIZE, total)} of {total} runs
-            </>
-          ) : (
-            'No runs'
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => p + 1)}
-            disabled={page >= totalPages - 1}
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        total={total}
+        page={page}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+        entityName="runs"
+      />
     </div>
   );
 }

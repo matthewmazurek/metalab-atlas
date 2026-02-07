@@ -1,14 +1,16 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useTableNavigation } from '@/hooks/useTableNavigation';
 import { useQueries } from '@tanstack/react-query';
-import { useExperiments, useRuns, queryKeys } from '@/api/hooks';
-import { fetchLatestManifest, fetchRuns } from '@/api/client';
-import { Button } from '@/components/ui/button';
+import { useExperiments, useSearch, useStatusCounts, useStatusCountsBatch, queryKeys } from '@/api/hooks';
+import { fetchLatestManifest } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
+import { FilterPills } from '@/components/ui/FilterPills';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
 import {
   Table,
   TableBody,
+  TableContainer,
   TableCell,
   TableHead,
   TableHeader,
@@ -16,15 +18,8 @@ import {
 } from '@/components/ui/table';
 import { ColumnHeader, type SortDirection } from '@/components/runs/ColumnHeader';
 import type { ExperimentInfo, ManifestResponse } from '@/api/types';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  CheckCircle2,
-  AlertTriangle,
-  Beaker,
-  X,
-} from 'lucide-react';
+import { PaginationBar } from '@/components/ui/PaginationBar';
+import { Loader2, CheckCircle2, AlertTriangle, Beaker } from 'lucide-react';
 import { formatRelativeTime, parseApiDate } from '@/lib/datetime';
 
 const PAGE_SIZE = 25;
@@ -67,103 +62,6 @@ function useExperimentManifests(experimentIds: string[]) {
   return { manifestMap, allTags };
 }
 
-/**
- * Hook to fetch status counts for multiple experiments in parallel
- */
-function useExperimentStatuses(experimentIds: string[]) {
-  // Fetch success counts for all experiments
-  const successQueries = useQueries({
-    queries: experimentIds.map((id) => ({
-      queryKey: ['experiment-status', id, 'success'],
-      queryFn: async () => {
-        const result = await fetchRuns({
-          filter: { experiment_id: id, status: ['success'] },
-          limit: 1,
-        });
-        return { experimentId: id, count: result.total ?? 0 };
-      },
-      enabled: !!id,
-      staleTime: 30 * 1000,
-    })),
-  });
-
-  // Fetch failed counts for all experiments
-  const failedQueries = useQueries({
-    queries: experimentIds.map((id) => ({
-      queryKey: ['experiment-status', id, 'failed'],
-      queryFn: async () => {
-        const result = await fetchRuns({
-          filter: { experiment_id: id, status: ['failed'] },
-          limit: 1,
-        });
-        return { experimentId: id, count: result.total ?? 0 };
-      },
-      enabled: !!id,
-      staleTime: 30 * 1000,
-    })),
-  });
-
-  // Fetch running counts for all experiments
-  const runningQueries = useQueries({
-    queries: experimentIds.map((id) => ({
-      queryKey: ['experiment-status', id, 'running'],
-      queryFn: async () => {
-        const result = await fetchRuns({
-          filter: { experiment_id: id, status: ['running'] },
-          limit: 1,
-        });
-        return { experimentId: id, count: result.total ?? 0 };
-      },
-      enabled: !!id,
-      staleTime: 30 * 1000,
-    })),
-  });
-
-  // Build a map of experiment_id -> status counts
-  const statusMap = useMemo(() => {
-    const map = new Map<string, { successCount: number; failedCount: number; runningCount: number }>();
-    experimentIds.forEach((id, index) => {
-      const successData = successQueries[index]?.data;
-      const failedData = failedQueries[index]?.data;
-      const runningData = runningQueries[index]?.data;
-      map.set(id, {
-        successCount: successData?.count ?? 0,
-        failedCount: failedData?.count ?? 0,
-        runningCount: runningData?.count ?? 0,
-      });
-    });
-    return map;
-  }, [experimentIds, successQueries, failedQueries, runningQueries]);
-
-  return { statusMap };
-}
-
-/**
- * Hook to get status counts for an experiment
- */
-function useExperimentStatus(experimentId: string) {
-  const { data: successData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['success'] },
-    limit: 1,
-  });
-
-  const { data: failedData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['failed'] },
-    limit: 1,
-  });
-
-  const { data: runningData } = useRuns({
-    filter: { experiment_id: experimentId, status: ['running'] },
-    limit: 1,
-  });
-
-  return {
-    successCount: successData?.total ?? 0,
-    failedCount: failedData?.total ?? 0,
-    runningCount: runningData?.total ?? 0,
-  };
-}
-
 // Status values for filtering
 const STATUS_VALUES = ['Complete', 'In progress'];
 
@@ -178,12 +76,19 @@ const STATUS_VALUES = ['Complete', 'In progress'];
 function ExperimentRow({
   experiment,
   manifest,
+  rowIndex,
+  focused,
 }: {
   experiment: ExperimentInfo;
   manifest?: ManifestResponse;
+  rowIndex?: number;
+  focused?: boolean;
 }) {
   const navigate = useNavigate();
-  const { successCount, failedCount, runningCount } = useExperimentStatus(experiment.experiment_id);
+  const { data: statusCounts } = useStatusCounts(experiment.experiment_id);
+  const successCount = statusCounts?.success ?? 0;
+  const failedCount = statusCounts?.failed ?? 0;
+  const runningCount = statusCounts?.running ?? 0;
 
   const displayName = manifest?.name || experiment.experiment_id;
   const totalRuns = manifest?.total_runs;
@@ -198,8 +103,10 @@ function ExperimentRow({
 
   return (
     <TableRow
+      rowIndex={rowIndex}
       className="cursor-pointer"
       onClick={handleRowClick}
+      data-state={focused ? 'focused' : undefined}
     >
       {/* Name with status indicator */}
       <TableCell>
@@ -215,9 +122,9 @@ function ExperimentRow({
                 {displayName}
               </Link>
               {isAllSuccess ? (
-                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                <CheckCircle2 className="h-4 w-4 text-status-success shrink-0" />
               ) : hasFailures ? (
-                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <AlertTriangle className="h-4 w-4 text-status-warning shrink-0" />
               ) : null}
             </div>
             {manifest?.name && manifest.name !== experiment.experiment_id && (
@@ -294,6 +201,7 @@ export interface ExperimentTableProps {
 }
 
 export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(0);
   const [sortField, setSortField] = useState<SortField>('latest_run');
@@ -301,6 +209,11 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
 
   // URL is the source of truth for filters
   const nameFilter = searchParams.get('name') || '';
+  const hasParam = searchParams.get('has_param') || '';
+  const hasMetric = searchParams.get('has_metric') || '';
+  const hasDerived = searchParams.get('has_derived') || '';
+  const hasArtifact = searchParams.get('has_artifact') || '';
+  const hasTag = searchParams.get('has_tag') || '';
   const selectedTags = useMemo(
     () => searchParams.get('tags')?.split(',').filter(Boolean) || [],
     [searchParams]
@@ -310,17 +223,28 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     [searchParams]
   );
 
-  const syncFiltersToUrl = useCallback((
-    tags: string[],
-    statuses: string[],
-    name: string
-  ) => {
-    const params = new URLSearchParams();
-    if (tags.length > 0) params.set('tags', tags.join(','));
-    if (statuses.length > 0) params.set('status', statuses.join(','));
-    if (name) params.set('name', name);
-    setSearchParams(params, { replace: true });
-  }, [setSearchParams]);
+  const syncFiltersToUrl = useCallback(
+    (
+      tags: string[],
+      statuses: string[],
+      name: string,
+      options?: { clearHasField?: boolean }
+    ) => {
+      const params = new URLSearchParams();
+      if (tags.length > 0) params.set('tags', tags.join(','));
+      if (statuses.length > 0) params.set('status', statuses.join(','));
+      if (name) params.set('name', name);
+      if (!options?.clearHasField) {
+        if (hasParam) params.set('has_param', hasParam);
+        if (hasMetric) params.set('has_metric', hasMetric);
+        if (hasDerived) params.set('has_derived', hasDerived);
+        if (hasArtifact) params.set('has_artifact', hasArtifact);
+        if (hasTag) params.set('has_tag', hasTag);
+      }
+      setSearchParams(params, { replace: true });
+    },
+    [setSearchParams, hasParam, hasMetric, hasDerived, hasArtifact, hasTag]
+  );
 
   // Notify parent of filter changes
   useEffect(() => {
@@ -328,6 +252,38 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   }, [nameFilter, selectedTags, selectedStatuses, onFiltersChange]);
 
   const { data: experimentsData, isLoading: experimentsLoading } = useExperiments();
+
+  // When linking from search overflow (e.g. "8 matching experiments" for metric "dummy"),
+  // filter to experiments that have that param/metric/derived/artifact (from search API).
+  const hasFieldQuery =
+    hasParam || hasMetric || hasDerived || hasArtifact || hasTag
+      ? hasParam || hasMetric || hasDerived || hasArtifact || hasTag
+      : '';
+  const hasFieldCategory =
+    hasParam
+      ? 'param_names'
+      : hasMetric
+        ? 'metric_names'
+        : hasDerived
+          ? 'derived_names'
+          : hasArtifact
+            ? 'artifacts'
+            : hasTag
+              ? 'tags'
+              : null;
+  const { data: searchData, isFetching: searchFetching } = useSearch(
+    hasFieldQuery,
+    200
+  );
+  const hasFieldExperimentIds = useMemo(() => {
+    if (!hasFieldCategory) return null;
+    if (searchFetching || !searchData?.groups) {
+      return new Set<string>(); // loading or no data yet: show nothing until we have results
+    }
+    const group = searchData.groups.find((g) => g.category === hasFieldCategory);
+    if (!group) return new Set<string>();
+    return new Set(group.hits.map((h) => h.entity_id));
+  }, [searchData?.groups, hasFieldCategory, searchFetching]);
 
   // Get all experiment IDs
   const experimentIds = useMemo(
@@ -339,9 +295,11 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   const { manifestMap, allTags } = useExperimentManifests(experimentIds);
 
   // Load status counts for all experiments to enable status filtering
-  const { statusMap } = useExperimentStatuses(experimentIds);
+  const { statusMap } = useStatusCountsBatch(experimentIds);
 
-  const isLoading = experimentsLoading;
+  const isLoading =
+    experimentsLoading ||
+    (hasFieldCategory != null && hasFieldQuery.length >= 2 && searchFetching);
 
   // Apply filtering (name, tags, and status)
   const filteredExperiments = useMemo(() => {
@@ -372,11 +330,18 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     };
 
     return experimentsData.experiments.filter((exp) => {
-      // Name filter
-      if (nameFilter) {
-        const lowerFilter = nameFilter.toLowerCase();
-        if (!exp.experiment_id.toLowerCase().includes(lowerFilter)) {
+      // "Has field" filter (from search overflow: experiments with this param/metric/derived/artifact)
+      if (hasFieldExperimentIds !== null) {
+        if (!hasFieldExperimentIds.has(exp.experiment_id)) {
           return false;
+        }
+      } else {
+        // Name filter (only when not filtering by "has field")
+        if (nameFilter) {
+          const lowerFilter = nameFilter.toLowerCase();
+          if (!exp.experiment_id.toLowerCase().includes(lowerFilter)) {
+            return false;
+          }
         }
       }
 
@@ -398,7 +363,15 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
 
       return true;
     });
-  }, [experimentsData, nameFilter, selectedTags, selectedStatuses, manifestMap, statusMap]);
+  }, [
+    experimentsData,
+    nameFilter,
+    selectedTags,
+    selectedStatuses,
+    manifestMap,
+    statusMap,
+    hasFieldExperimentIds,
+  ]);
 
   // Apply sorting (client-side for now since we don't have server-side sorting for experiments)
   const sortedExperiments = useMemo(() => {
@@ -460,6 +433,24 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   const total = sortedExperiments.length;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
+  const handleOpenRow = useCallback(
+    (index: number) => {
+      const exp = paginatedExperiments[index];
+      if (exp) {
+        navigate(`/experiments/${encodeURIComponent(exp.experiment_id)}`);
+      }
+    },
+    [paginatedExperiments, navigate]
+  );
+
+  const { focusedIndex, tableBodyRef } = useTableNavigation({
+    rowCount: paginatedExperiments.length,
+    onOpen: handleOpenRow,
+    page,
+    totalPages,
+    onPageChange: setPage,
+  });
+
   const handleSort = (field: SortField) => (direction: SortDirection) => {
     if (direction === null) {
       setSortField('latest_run');
@@ -487,11 +478,84 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
   };
 
   const clearAllFilters = () => {
-    syncFiltersToUrl([], [], '');
+    syncFiltersToUrl([], [], '', { clearHasField: true });
     setPage(0);
   };
 
-  const hasActiveFilters = nameFilter.length > 0 || selectedTags.length > 0 || selectedStatuses.length > 0;
+  const clearHasFieldFilter = () => {
+    syncFiltersToUrl(selectedTags, selectedStatuses, nameFilter, {
+      clearHasField: true,
+    });
+    setPage(0);
+  };
+
+  const hasActiveFilters =
+    nameFilter.length > 0 ||
+    selectedTags.length > 0 ||
+    selectedStatuses.length > 0 ||
+    !!(hasParam || hasMetric || hasDerived || hasArtifact || hasTag);
+
+  const hasFieldFilterLabel =
+    hasParam
+      ? { label: 'Parameter', value: hasParam }
+      : hasMetric
+        ? { label: 'Metric', value: hasMetric }
+        : hasDerived
+          ? { label: 'Derived metric', value: hasDerived }
+          : hasArtifact
+            ? { label: 'Artifact', value: hasArtifact }
+            : hasTag
+              ? { label: 'Tag', value: hasTag }
+              : null;
+
+  const filterPills = useMemo(() => {
+    const pills: { key: string; display: string; onRemove: () => void }[] = [];
+    if (hasFieldFilterLabel) {
+      pills.push({
+        key: 'has-field',
+        display: `${hasFieldFilterLabel.label}: "${hasFieldFilterLabel.value}"`,
+        onRemove: clearHasFieldFilter,
+      });
+    }
+    if (nameFilter) {
+      pills.push({
+        key: 'name',
+        display: `Name contains "${nameFilter}"`,
+        onRemove: () => {
+          syncFiltersToUrl(selectedTags, selectedStatuses, '', { clearHasField: false });
+          setPage(0);
+        },
+      });
+    }
+    selectedTags.forEach((tag) => {
+      pills.push({
+        key: `tag-${tag}`,
+        display: `Tag: ${tag}`,
+        onRemove: () => {
+          handleTagFilter(selectedTags.filter((t) => t !== tag));
+        },
+      });
+    });
+    selectedStatuses.forEach((status) => {
+      pills.push({
+        key: `status-${status}`,
+        display: `Status: ${status}`,
+        onRemove: () => {
+          handleStatusFilter(selectedStatuses.filter((s) => s !== status));
+        },
+      });
+    });
+    return pills;
+  }, [
+    hasFieldFilterLabel,
+    nameFilter,
+    selectedTags,
+    selectedStatuses,
+    clearHasFieldFilter,
+    syncFiltersToUrl,
+    handleTagFilter,
+    handleStatusFilter,
+  ]);
 
   if (isLoading) {
     return (
@@ -503,45 +567,12 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
 
   return (
     <div className="space-y-4">
-      {/* Active filters bar */}
       {hasActiveFilters && (
-        <div className="flex items-center gap-2 flex-wrap text-sm">
-          <span className="text-muted-foreground">Filters:</span>
-          {nameFilter && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
-              Name: "{nameFilter}"
-            </span>
-          )}
-          {selectedTags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
-            >
-              Tag: {tag}
-            </span>
-          ))}
-          {selectedStatuses.map((status) => (
-            <span
-              key={status}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
-            >
-              Status: {status}
-            </span>
-          ))}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={clearAllFilters}
-          >
-            <X className="h-3 w-3 mr-1" />
-            Clear
-          </Button>
-        </div>
+        <FilterPills pills={filterPills} onClearAll={clearAllFilters} />
       )}
 
       {/* Table */}
-      <div className="border border-border/60 rounded-xl overflow-x-auto bg-card shadow-sm">
+      <TableContainer>
         <Table>
           <TableHeader>
             <TableRow>
@@ -619,7 +650,7 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
               </TableHead>
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody ref={tableBodyRef}>
             {paginatedExperiments.length === 0 ? (
               <TableRow>
                 <TableCell
@@ -636,51 +667,27 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedExperiments.map((experiment) => (
+              paginatedExperiments.map((experiment, i) => (
                 <ExperimentRow
                   key={experiment.experiment_id}
                   experiment={experiment}
                   manifest={manifestMap.get(experiment.experiment_id)}
+                  rowIndex={i}
+                  focused={i === focusedIndex}
                 />
               ))
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableContainer>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {total > 0 ? (
-            <>
-              Showing {page * PAGE_SIZE + 1}-
-              {Math.min((page + 1) * PAGE_SIZE, total)} of {total} experiments
-            </>
-          ) : (
-            'No experiments'
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => p + 1)}
-            disabled={page >= totalPages - 1}
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        total={total}
+        page={page}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+        entityName="experiments"
+      />
     </div>
   );
 }

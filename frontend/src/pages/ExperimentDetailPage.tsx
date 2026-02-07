@@ -1,23 +1,26 @@
 import { useParams, Link } from 'react-router-dom';
-import { useExperiments, useLatestManifest, useExperimentManifests, useStatusCounts, useFields } from '@/api/hooks';
+import { useExperiments, useLatestManifest, useExperimentManifests, useManifest, useStatusCounts, useFields } from '@/api/hooks';
+import type { ManifestInfo } from '@/api/types';
+import { useAtlasStore } from '@/store/useAtlasStore';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/ui/page-header';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
 import { ExportModal } from '@/components/experiments/ExportModal';
 import { MetricsSummaryCard } from '@/components/experiments/MetricsSummaryCard';
 import { DistributionCard } from '@/components/experiments/DistributionCard';
 import { ParamsDisplay, MetadataDisplay } from '@/components/detail/KeyValueDisplay';
+import { CopyableField } from '@/components/detail/CopyableField';
 import { SlurmStatusBadge } from '@/components/experiments/SlurmStatusBadge';
 import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  Clock,
   Code,
-  Copy,
   Download,
+  Eye,
   FileJson,
   Fingerprint,
   Info,
@@ -30,65 +33,11 @@ import {
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime, formatTimestamp } from '@/lib/datetime';
+import { SECTION_HEADING_CLASS } from '@/lib/styles';
 
 // API base URL for downloads
 const API_BASE = import.meta.env.VITE_API_URL ||
   (import.meta.env.PROD ? '' : 'http://localhost:8000');
-
-const SECTION_HEADING_CLASS =
-  'text-[11px] font-medium tracking-wider text-muted-foreground uppercase';
-
-/**
- * Copyable field component with click-to-copy functionality
- */
-function CopyableField({
-  label,
-  value,
-  mono = true,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="group min-w-0">
-      <div className="text-muted-foreground text-xs mb-0.5">{label}</div>
-      <div className="flex items-start gap-1">
-        <div className="overflow-x-auto min-w-0 flex-1">
-          <button
-            onClick={handleCopy}
-            className={cn(
-              'text-sm text-left hover:bg-muted/50 px-1 -mx-1 rounded transition-colors whitespace-nowrap',
-              mono && 'font-mono'
-            )}
-            title="Click to copy"
-          >
-            {value}
-          </button>
-        </div>
-        <button
-          onClick={handleCopy}
-          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded shrink-0"
-          title="Copy to clipboard"
-        >
-          {copied ? (
-            <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-          ) : (
-            <Copy className="h-3 w-3 text-muted-foreground" />
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function getParamCombinations(params: Record<string, unknown> | null | undefined): number | null {
   if (!params) return null;
@@ -115,6 +64,57 @@ function getSeedReplicates(seeds: Record<string, unknown> | null | undefined): n
 }
 
 
+function ManifestPreviewDialog({
+  experimentId,
+  manifest,
+  open,
+  onClose,
+}: {
+  experimentId: string;
+  manifest: ManifestInfo;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { data, isLoading } = useManifest(experimentId, manifest.timestamp);
+  const downloadUrl = `${API_BASE}/api/experiments/${encodeURIComponent(experimentId)}/manifests/${manifest.timestamp}?pretty=true`;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            manifest-{manifest.timestamp}.json
+            <span className="text-xs text-muted-foreground font-normal">
+              ({manifest.total_runs} runs)
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="min-w-0 max-h-[60vh] overflow-auto rounded bg-muted">
+          {isLoading ? (
+            <div className="p-4 text-center text-muted-foreground">Loading...</div>
+          ) : data ? (
+            <pre className="p-4 text-sm w-fit min-w-full">
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          ) : (
+            <div className="p-4 text-center text-muted-foreground">
+              Unable to load manifest
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" asChild>
+            <a href={downloadUrl} download={`manifest-${manifest.timestamp}.json`}>
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </a>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
   const decodedExperimentId = experimentId ? decodeURIComponent(experimentId) : '';
@@ -122,8 +122,12 @@ export function ExperimentDetailPage() {
   // Export modal state
   const [exportOpen, setExportOpen] = useState(false);
 
+  // Manifest preview state
+  const [previewManifest, setPreviewManifest] = useState<ManifestInfo | null>(null);
+
   // Selected metric field for distribution card (shared between summary and distribution)
-  const [selectedMetricField, setSelectedMetricField] = useState<string>('');
+  // Persisted in store so the selection carries over to run detail pages
+  const { selectedMetricField, setSelectedMetricField } = useAtlasStore();
 
   const { data: experimentsData } = useExperiments();
   const {
@@ -203,7 +207,7 @@ export function ExperimentDetailPage() {
         }
         breadcrumb={[
           { label: 'Experiments', href: '/experiments' },
-          { label: displayName },
+          { label: decodedExperimentId },
         ]}
         actions={
           <>
@@ -245,9 +249,9 @@ export function ExperimentDetailPage() {
             <div className="flex items-center gap-3">
               {isAllSuccess ? (
                 <>
-                  <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <CheckCircle2 className="h-5 w-5 text-status-success shrink-0" />
                   <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">Complete</span>
+                    <span className="text-lg font-semibold text-status-success">Complete</span>
                     <span className="text-sm text-muted-foreground">
                       {completedRuns}/{expectedTotal ?? '—'} runs
                     </span>
@@ -255,10 +259,10 @@ export function ExperimentDetailPage() {
                 </>
               ) : isComplete && hasFailures ? (
                 <>
-                  <AlertTriangle className="h-5 w-5 text-violet-600 dark:text-violet-400 shrink-0" />
+                  <AlertTriangle className="h-5 w-5 text-status-warning shrink-0" />
                   <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-semibold text-violet-600 dark:text-violet-400">Complete</span>
-                    <span className="text-sm text-violet-600 dark:text-violet-400">(with failures)</span>
+                    <span className="text-lg font-semibold text-status-warning">Complete</span>
+                    <span className="text-sm text-status-warning">(with failures)</span>
                     <span className="text-sm text-muted-foreground">
                       {completedRuns}/{expectedTotal ?? '—'} runs
                     </span>
@@ -266,10 +270,10 @@ export function ExperimentDetailPage() {
                 </>
               ) : hasFailures ? (
                 <>
-                  <AlertTriangle className="h-5 w-5 text-violet-600 dark:text-violet-400 shrink-0" />
+                  <AlertTriangle className="h-5 w-5 text-status-warning shrink-0" />
                   <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-semibold text-violet-600 dark:text-violet-400">In progress</span>
-                    <span className="text-sm text-violet-600 dark:text-violet-400">(with failures)</span>
+                    <span className="text-lg font-semibold text-status-warning">In progress</span>
+                    <span className="text-sm text-status-warning">(with failures)</span>
                     <span className="text-sm text-muted-foreground">
                       {completedRuns}/{expectedTotal ?? '—'} runs
                     </span>
@@ -277,9 +281,9 @@ export function ExperimentDetailPage() {
                 </>
               ) : (
                 <>
-                  <PlayCircle className="h-5 w-5 text-cyan-700 dark:text-cyan-300 shrink-0" />
+                  <PlayCircle className="h-5 w-5 text-status-running shrink-0" />
                   <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-semibold text-cyan-700 dark:text-cyan-300">In progress</span>
+                    <span className="text-lg font-semibold text-status-running">In progress</span>
                     <span className="text-sm text-muted-foreground">
                       {completedRuns}/{expectedTotal ?? '—'} runs
                     </span>
@@ -300,19 +304,19 @@ export function ExperimentDetailPage() {
                     >
                       {successPercent > 0 && (
                         <div
-                          className="h-full bg-emerald-500 dark:bg-emerald-400"
+                          className="h-full bg-status-success"
                           style={{ width: `${(successPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
                         />
                       )}
                       {failedPercent > 0 && (
                         <div
-                          className="h-full bg-rose-500 dark:bg-rose-400"
+                          className="h-full bg-status-failure"
                           style={{ width: `${(failedPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
                         />
                       )}
                       {runningPercent > 0 && (
                         <div
-                          className="h-full bg-cyan-500 dark:bg-cyan-400"
+                          className="h-full bg-status-running"
                           style={{ width: `${(runningPercent / (successPercent + failedPercent + runningPercent)) * 100}%` }}
                         />
                       )}
@@ -336,7 +340,7 @@ export function ExperimentDetailPage() {
 
           {/* Summary stats (compact pills) */}
           <div className="border-t pt-4 space-y-3">
-            <div className="text-muted-foreground text-[11px] font-medium tracking-wider uppercase">
+            <div className="font-sans text-xs font-medium uppercase tracking-wide text-brand-tertiary">
               Summary
             </div>
 
@@ -345,14 +349,14 @@ export function ExperimentDetailPage() {
               <div
                 className="rounded-lg border border-border/50 bg-card/70 px-3 py-2"
               >
-                <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Total
                 </div>
                 <div className="text-sm font-medium tabular-nums">
                   {expectedTotal ?? calculatedTotal ?? '—'}
                 </div>
                 {paramCombinations != null && seedReplicates != null && (
-                  <div className="text-[11px] text-muted-foreground tabular-nums">
+                  <div className="font-sans text-xs text-muted-foreground tabular-nums">
                     {paramCombinations.toLocaleString()} params × {seedReplicates.toLocaleString()} seeds
                   </div>
                 )}
@@ -363,13 +367,13 @@ export function ExperimentDetailPage() {
                 to={`/runs?experiment_id=${encodeURIComponent(decodedExperimentId)}&status=success`}
                 className="rounded-lg border border-border/50 bg-card/70 px-3 py-2 transition-colors hover:bg-card/95"
               >
-                <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Success
                 </div>
                 <div
                   className={cn(
                     'text-sm font-medium tabular-nums',
-                    successCount > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'
+                    successCount > 0 ? 'text-status-success' : 'text-muted-foreground'
                   )}
                 >
                   {successCount}
@@ -381,13 +385,13 @@ export function ExperimentDetailPage() {
                 to={`/runs?experiment_id=${encodeURIComponent(decodedExperimentId)}&status=failed`}
                 className="rounded-lg border border-border/50 bg-card/70 px-3 py-2 transition-colors hover:bg-card/95"
               >
-                <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Failed
                 </div>
                 <div
                   className={cn(
                     'text-sm font-medium tabular-nums',
-                    failedCount > 0 ? 'text-rose-700 dark:text-rose-300' : 'text-muted-foreground'
+                    failedCount > 0 ? 'text-status-failure' : 'text-muted-foreground'
                   )}
                 >
                   {failedCount}
@@ -399,13 +403,13 @@ export function ExperimentDetailPage() {
                 to={`/runs?experiment_id=${encodeURIComponent(decodedExperimentId)}&status=running`}
                 className="rounded-lg border border-border/50 bg-card/70 px-3 py-2 transition-colors hover:bg-card/95"
               >
-                <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Running
                 </div>
                 <div
                   className={cn(
                     'text-sm font-medium tabular-nums',
-                    runningCount > 0 ? 'text-cyan-700 dark:text-cyan-300' : 'text-muted-foreground'
+                    runningCount > 0 ? 'text-status-running' : 'text-muted-foreground'
                   )}
                 >
                   {runningCount}
@@ -415,10 +419,10 @@ export function ExperimentDetailPage() {
               {/* Failure rate */}
               {hasFailures && failureRate && (
                 <div className="rounded-lg border border-border/50 bg-card/70 px-3 py-2">
-                  <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                  <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Failure rate
                   </div>
-                  <div className="text-sm font-medium tabular-nums text-rose-700 dark:text-rose-300">
+                  <div className="text-sm font-medium tabular-nums text-status-failure">
                     {failureRate}%
                   </div>
                 </div>
@@ -428,13 +432,13 @@ export function ExperimentDetailPage() {
               <div
                 className="rounded-lg border border-border/50 bg-card/70 px-3 py-2"
               >
-                <div className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+                <div className="font-sans text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Latest
                 </div>
                 <div className="text-sm font-medium">
                   {formatRelativeTime(experiment?.latest_run)}
                 </div>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="font-sans text-xs text-muted-foreground">
                   {experiment?.latest_run ? formatTimestamp(experiment.latest_run) : '—'}
                 </div>
               </div>
@@ -624,28 +628,38 @@ export function ExperimentDetailPage() {
               </CardHeader>
               <CardContent>
                 {manifestsData && manifestsData.manifests.length > 0 ? (
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                  <div className="grid gap-2 grid-cols-1">
                     {manifestsData.manifests.map((m) => (
                       <div
                         key={m.timestamp}
-                        className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0"
+                        className="flex items-center justify-between p-3 border rounded-lg min-w-0"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <div className="flex items-center gap-3 min-w-0">
+                          <FileJson className="h-5 w-5 text-muted-foreground shrink-0" />
                           <div className="min-w-0">
-                            <div className="text-sm truncate">{formatTimestamp(m.submitted_at)}</div>
-                            <div className="text-xs text-muted-foreground">{m.total_runs} runs</div>
+                            <div className="font-medium truncate">manifest-{m.timestamp}.json</div>
+                            <div className="text-sm text-muted-foreground truncate">
+                              {m.total_runs} runs &middot; {formatTimestamp(m.submitted_at)}
+                            </div>
                           </div>
                         </div>
-                        <a
-                          href={`${API_BASE}/api/experiments/${encodeURIComponent(decodedExperimentId)}/manifests/${m.timestamp}?pretty=true`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-primary hover:underline shrink-0"
-                        >
-                          <Download className="h-3 w-3" />
-                          JSON
-                        </a>
+                        <div className="flex gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPreviewManifest(m)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" asChild>
+                            <a
+                              href={`${API_BASE}/api/experiments/${encodeURIComponent(decodedExperimentId)}/manifests/${m.timestamp}?pretty=true`}
+                              download={`manifest-${m.timestamp}.json`}
+                            >
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -654,6 +668,15 @@ export function ExperimentDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {previewManifest && (
+              <ManifestPreviewDialog
+                experimentId={decodedExperimentId}
+                manifest={previewManifest}
+                open={!!previewManifest}
+                onClose={() => setPreviewManifest(null)}
+              />
+            )}
           </div>
         </div>
       )}
@@ -700,19 +723,6 @@ export function ExperimentDetailPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          ROW 7: Footer (cardless)
-          ═══════════════════════════════════════════════════════════════════ */}
-      {manifest && !manifestError && (
-        <div className="text-xs text-muted-foreground/70 text-center pt-2">
-          Experiment ID: <span className="font-mono">{decodedExperimentId}</span>
-          {manifest.version && <> · v{manifest.version}</>}
-          {manifest.context_fingerprint && (
-            <> · Context: <span className="font-mono">{manifest.context_fingerprint.slice(0, 8)}</span></>
-          )}
         </div>
       )}
 

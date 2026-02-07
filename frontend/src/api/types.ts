@@ -15,6 +15,8 @@ export interface FieldFilter {
   field: string;
   op: FilterOp;
   value: unknown;
+  /** UI-only: display as "N runs from plot" when set from plot click. Not sent to API. */
+  _fromPlot?: boolean;
 }
 
 export interface FilterSpec {
@@ -177,21 +179,6 @@ export interface ManifestResponse {
   submitted_at?: string | null;
 }
 
-// Histogram models
-export interface HistogramRequest {
-  field: string;
-  bin_count?: number;
-  filter?: FilterSpec | null;
-}
-
-export interface HistogramResponse {
-  field: string;
-  bins: number[];
-  counts: number[];
-  total: number;
-  run_ids_per_bin?: string[][] | null;
-}
-
 // Field values models (for frontend-driven plotting)
 export interface FieldValuesRequest {
   filter?: FilterSpec | null;
@@ -233,4 +220,28 @@ export interface StatusCounts {
   running: number;
   cancelled: number;
   total: number;
+}
+
+// Search models
+export interface SearchHit {
+  label: string;
+  sublabel?: string | null;
+  entity_type: 'experiment' | 'run';
+  entity_id: string;
+  field?: string | null;
+  value?: string | null;
+}
+
+export interface SearchGroup {
+  category: string;
+  label: string;
+  scope: 'experiment' | 'run';
+  hits: SearchHit[];
+  total: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  groups: SearchGroup[];
+  truncated?: boolean;
 }

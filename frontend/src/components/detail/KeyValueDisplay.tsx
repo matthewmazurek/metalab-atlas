@@ -227,7 +227,7 @@ function CopyableRow({ entry }: { entry: DisplayEntry }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-sm">{entry.key}</span>
-            <span className="text-[10px] text-muted-foreground/70 font-mono px-1 py-0.5 bg-muted/50 rounded">
+            <span className="font-mono text-xs text-muted-foreground/70 px-1 py-0.5 bg-muted/50 rounded">
               {entry.shape}
             </span>
           </div>
@@ -304,7 +304,7 @@ function CopyableRow({ entry }: { entry: DisplayEntry }) {
             title="Copy to clipboard (full data)"
           >
             {copied ? (
-              <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+              <CheckCircle2 className="h-3 w-3 text-status-success" />
             ) : (
               <Copy className="h-3 w-3 text-muted-foreground" />
             )}
@@ -393,7 +393,7 @@ export function KeyValueDisplay({
               setExpanded(!expanded);
               if (expanded) setFilter('');
             }}
-            className="text-xs text-primary hover:underline flex items-center gap-1"
+            className="text-xs text-brand-secondary hover:underline flex items-center gap-1"
           >
             {expanded ? (
               <>

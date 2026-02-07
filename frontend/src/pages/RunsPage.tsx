@@ -11,47 +11,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAtlasStore } from '@/store/useAtlasStore';
-import { useExperiments, useLatestManifest, useRuns } from '@/api/hooks';
+import { useExperiments, useLatestManifest, useStatusCounts } from '@/api/hooks';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { GitCompare, X, CheckCircle2, AlertTriangle, CheckSquare, BarChart3 } from 'lucide-react';
-import type { FieldFilter, FilterOp } from '@/api/types';
-
-function isFilterOp(op: unknown): op is FilterOp {
-  return op === 'eq' || op === 'ne' || op === 'lt' || op === 'le' || op === 'gt' || op === 'ge'
-    || op === 'contains' || op === 'in';
-}
-
-function isFieldFilter(v: unknown): v is FieldFilter {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as { field?: unknown; op?: unknown; value?: unknown };
-  return typeof obj.field === 'string' && isFilterOp(obj.op) && 'value' in obj;
-}
-
-/**
- * Hook to get status counts for an experiment
- */
-function useStatusCounts(experimentId: string | null) {
-  const { data: successData } = useRuns({
-    filter: {
-      experiment_id: experimentId ?? undefined,
-      status: ['success'],
-    },
-    limit: 1,
-  });
-
-  const { data: failedData } = useRuns({
-    filter: {
-      experiment_id: experimentId ?? undefined,
-      status: ['failed'],
-    },
-    limit: 1,
-  });
-
-  return {
-    successCount: successData?.total ?? 0,
-    failedCount: failedData?.total ?? 0,
-  };
-}
+import { FilterPills, formatFieldFilterDisplay } from '@/components/ui/FilterPills';
+import { GitCompare, CheckCircle2, AlertTriangle, CheckSquare, BarChart3 } from 'lucide-react';
 
 export function RunsPage() {
   const [searchParams] = useSearchParams();
@@ -63,78 +26,54 @@ export function RunsPage() {
     clearSelection,
     hasSelection,
     getSelectionSummary,
-    columnFilters,
-    clearAllColumnFilters,
     filter,
     updateFilter,
-    getFieldFilters,
+    removeFieldFilter,
+    clearFieldFilters,
   } = useAtlasStore();
   const selectionSummary = getSelectionSummary();
   const hasActiveSelection = hasSelection();
 
-  // URL-based field filters (derived from URL, NOT stored in global filter)
-  // This prevents pollution of the global filter state when navigating from plots.
-  const urlFieldFilters = useMemo((): FieldFilter[] => {
-    const fieldFiltersParam = searchParams.get('field_filters');
-    if (!fieldFiltersParam) return [];
-    try {
-      const parsedFilters = JSON.parse(fieldFiltersParam);
-      return Array.isArray(parsedFilters) ? parsedFilters.filter(isFieldFilter) : [];
-    } catch {
-      return [];
-    }
-  }, [searchParams]);
-
-  const hasUrlFilters = urlFieldFilters.length > 0;
-  const hasColumnFilters = columnFilters.length > 0;
+  const hasFieldFilters = (filter.field_filters && filter.field_filters.length > 0) ?? false;
   const hasStatusFilter = (filter.status && filter.status.length > 0) ?? false;
-  const hasActiveFilters = hasUrlFilters || hasColumnFilters || hasStatusFilter;
-
-  // Clear a specific URL field filter
-  const clearUrlFilter = useCallback((index: number) => {
-    const newFieldFilters = urlFieldFilters.filter((_, i) => i !== index);
-    // Update URL
-    const newParams = new URLSearchParams(searchParams);
-    if (newFieldFilters.length > 0) {
-      newParams.set('field_filters', JSON.stringify(newFieldFilters));
-    } else {
-      newParams.delete('field_filters');
-    }
-    // Preserve experiment_id if present
-    const experimentId = searchParams.get('experiment_id');
-    if (experimentId && !newParams.has('experiment_id')) {
-      newParams.set('experiment_id', experimentId);
-    }
-    navigate(`/runs${newParams.toString() ? `?${newParams.toString()}` : ''}`);
-  }, [urlFieldFilters, searchParams, navigate]);
+  const hasActiveFilters = hasFieldFilters || hasStatusFilter;
 
   // Clear status filter
   const clearStatusFilter = useCallback(() => {
     updateFilter({ status: null });
-    const newParams = new URLSearchParams(searchParams);
-    newParams.delete('status');
-    navigate(`/runs${newParams.toString() ? `?${newParams.toString()}` : ''}`);
-  }, [searchParams, navigate, updateFilter]);
+  }, [updateFilter]);
 
-  // Clear all filters (both URL and column)
+  // Clear all filters
   const clearAllFilters = useCallback(() => {
-    clearAllColumnFilters();
+    clearFieldFilters();
     updateFilter({ status: null });
-    // Preserve experiment_id
-    const experimentId = searchParams.get('experiment_id');
-    navigate(experimentId ? `/runs?experiment_id=${encodeURIComponent(experimentId)}` : '/runs');
-  }, [clearAllColumnFilters, searchParams, navigate, updateFilter]);
+  }, [clearFieldFilters, updateFilter]);
 
-  // Format a field filter for display
-  const formatUrlFilter = (ff: typeof urlFieldFilters[0]) => {
-    if (ff.field === 'record.run_id' && ff.op === 'in' && Array.isArray(ff.value)) {
-      return `${ff.value.length} runs from plot`;
+  // Build filter pills for FilterPills component (standardized display)
+  const filterPills = useMemo(() => {
+    const pills: { key: string; display: string; onRemove: () => void }[] = [];
+    if (hasStatusFilter && filter.status) {
+      pills.push({
+        key: 'status',
+        display: `Status: ${filter.status.join(', ')}`,
+        onRemove: clearStatusFilter,
+      });
     }
-    if (ff.op === 'in' && Array.isArray(ff.value)) {
-      return `${ff.field}: [${ff.value.length}]`;
-    }
-    return `${ff.field} ${ff.op} ${ff.value}`;
-  };
+    filter.field_filters?.forEach((ff) => {
+      pills.push({
+        key: ff.field,
+        display: formatFieldFilterDisplay(ff),
+        onRemove: () => removeFieldFilter(ff.field),
+      });
+    });
+    return pills;
+  }, [
+    hasStatusFilter,
+    filter.status,
+    filter.field_filters,
+    clearStatusFilter,
+    removeFieldFilter,
+  ]);
 
   // Track total count of filtered runs
   const [totalFilteredRuns, setTotalFilteredRuns] = useState(0);
@@ -151,30 +90,18 @@ export function RunsPage() {
   // This is instant even for 300k+ runs
   const handleSelectAll = useCallback(() => {
     if (allSelected || totalFilteredRuns === 0) return;
-
-    // Build the merged filter (same as RunTable uses internally)
-    // Include: global filter + URL field filters + column filters
-    const columnFieldFilters = getFieldFilters();
-    const allFieldFilters = [...urlFieldFilters, ...columnFieldFilters];
-    const mergedFilter = allFieldFilters.length > 0
-      ? {
-        ...filter,
-        field_filters: [...(filter.field_filters || []), ...allFieldFilters],
-      }
-      : filter;
-
-    // Store the filter spec and count - no need to fetch IDs!
-    setSelectionFilter(mergedFilter, totalFilteredRuns);
-  }, [allSelected, totalFilteredRuns, filter, urlFieldFilters, getFieldFilters, setSelectionFilter]);
+    // Store the current filter spec and count - no need to fetch IDs!
+    setSelectionFilter(filter, totalFilteredRuns);
+  }, [allSelected, totalFilteredRuns, filter, setSelectionFilter]);
 
   // Fetch experiments for scope selector
   const { data: experimentsData } = useExperiments();
   const { data: manifest } = useLatestManifest(filter.experiment_id ?? '');
-  const { successCount, failedCount } = useStatusCounts(filter.experiment_id ?? null);
+  const { data: statusCounts } = useStatusCounts(filter.experiment_id ?? '');
+  const successCount = statusCounts?.success ?? 0;
+  const failedCount = statusCounts?.failed ?? 0;
 
-  // Sync filter state from URL params
-  // URL is source of truth for experiment_id and status when present
-  // Note: field_filters are handled separately via local state (urlFieldFilters)
+  // Sync experiment_id from URL on navigation (keep URL as source of truth for experiment)
   useEffect(() => {
     const experimentId = searchParams.get('experiment_id');
     const statusParam = searchParams.get('status');
@@ -190,8 +117,7 @@ export function RunsPage() {
       }
     }
 
-    // Always sync both experiment_id and status from URL
-    // This ensures URL is the source of truth on navigation
+    // Sync experiment_id and status from URL
     updateFilter({
       experiment_id: experimentId || null,
       status: statusFilter,
@@ -206,17 +132,12 @@ export function RunsPage() {
   const handleScopeChange = useCallback((value: string) => {
     if (value === '_all') {
       updateFilter({ experiment_id: null });
-      // Update URL, preserving other params
-      const newParams = new URLSearchParams(searchParams);
-      newParams.delete('experiment_id');
-      navigate(`/runs${newParams.toString() ? `?${newParams.toString()}` : ''}`);
+      navigate('/runs');
     } else {
       updateFilter({ experiment_id: value });
-      const newParams = new URLSearchParams(searchParams);
-      newParams.set('experiment_id', value);
-      navigate(`/runs?${newParams.toString()}`);
+      navigate(`/runs?experiment_id=${encodeURIComponent(value)}`);
     }
-  }, [updateFilter, searchParams, navigate]);
+  }, [updateFilter, navigate]);
 
   // Stats display (only when scoped to experiment)
   const completedRuns = successCount + failedCount;
@@ -249,9 +170,9 @@ export function RunsPage() {
       {filter.experiment_id && (
         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
           {isAllSuccess ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
           ) : hasFailures ? (
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+            <AlertTriangle className="h-3.5 w-3.5 text-status-warning" />
           ) : null}
           <span className="font-medium text-foreground">{completedRuns}</span>
           {expectedTotal != null && (
@@ -268,63 +189,8 @@ export function RunsPage() {
     </div>
   );
 
-  // Filters: URL + column + status filters
   const filtersRow = hasActiveFilters ? (
-    <div className="flex items-center gap-2 flex-wrap text-sm">
-      <span className="text-muted-foreground">Filters:</span>
-      {/* Status filter (from URL) */}
-      {hasStatusFilter && filter.status && (
-        <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
-        >
-          status: {filter.status.join(', ')}
-          <button
-            onClick={clearStatusFilter}
-            className="ml-1 hover:text-primary/70"
-            title="Remove filter"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </span>
-      )}
-      {/* URL-based field filters (e.g., from plot click-through) */}
-      {urlFieldFilters.map((ff, index) => (
-        <span
-          key={`url-${index}`}
-          className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
-        >
-          {formatUrlFilter(ff)}
-          <button
-            onClick={() => clearUrlFilter(index)}
-            className="ml-1 hover:text-primary/70"
-            title="Remove filter"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </span>
-      ))}
-      {/* Column filters */}
-      {columnFilters.map((cf) => (
-        <span
-          key={cf.columnId}
-          className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs"
-        >
-          {cf.columnId}:{' '}
-          {cf.values && cf.values.length > 0
-            ? `[${cf.values.length}]`
-            : `"${cf.value}"`}
-        </span>
-      ))}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 px-2"
-        onClick={clearAllFilters}
-      >
-        <X className="h-3 w-3 mr-1" />
-        Clear all
-      </Button>
-    </div>
+    <FilterPills pills={filterPills} onClearAll={clearAllFilters} />
   ) : null;
 
   // Actions: Selection controls + column picker
@@ -392,7 +258,7 @@ export function RunsPage() {
       />
 
       {/* Full-width table */}
-      <RunTable onTotalChange={handleTotalChange} urlFieldFilters={urlFieldFilters} />
+      <RunTable onTotalChange={handleTotalChange} />
     </div>
   );
 }

@@ -18,22 +18,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from atlas.models import (
-        AggregateRequest,
-        AggregateResponse,
-        HistogramRequest,
-        HistogramResponse,
-    )
+    from atlas.models import AggregateRequest, AggregateResponse
 
 
 @runtime_checkable
 class SupportsSqlPushdown(Protocol):
     """
-    Adapter capability: SQL-based aggregate/histogram computation.
+    Adapter capability: SQL-based aggregate computation.
 
     Used by:
     - aggregate router: to push aggregation to SQL for large datasets
-    - histogram router: to push binning to SQL for large datasets
 
     PostgresStoreAdapter implements this for efficient queries on 300k+ runs.
     """
@@ -50,21 +44,6 @@ class SupportsSqlPushdown(Protocol):
 
         Returns:
             Aggregated series data.
-        """
-        ...
-
-    def compute_histogram_sql(
-        self,
-        request: "HistogramRequest",
-    ) -> "HistogramResponse":
-        """
-        Compute histogram directly in SQL using width_bucket().
-
-        Args:
-            request: The histogram request parameters.
-
-        Returns:
-            Histogram bin data.
         """
         ...
 

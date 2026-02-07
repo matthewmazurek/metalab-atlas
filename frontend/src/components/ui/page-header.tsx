@@ -3,47 +3,17 @@ import { Breadcrumb, type BreadcrumbItem } from '@/components/ui/breadcrumb';
 import { cn } from '@/lib/utils';
 
 /**
- * PageHeader provides a consistent layout for page headers across all routes.
- *
- * Layout pattern (top to bottom):
- * 1. Breadcrumb row (reserved height for visual consistency, content optional)
- * 2. Identity layer: Title + subtitle + actions (always present)
- * 3. Context layer: Scope/selection summary + quick controls (optional)
- * 4. Filters layer: Filter chips + clear (optional)
- *
- * This ensures every page answers in order:
- * - "How did I get here?" (breadcrumb - for detail pages)
- * - "What is this page?" (title)
- * - "What am I looking at?" (context)
- * - "How is it filtered?" (filters)
- *
- * Usage:
- * <PageHeader
- *   title="Run abc123"
- *   subtitle="Experiment: my-experiment"
- *   breadcrumb={[
- *     { label: 'Experiments', href: '/experiments' },
- *     { label: 'my-experiment', href: '/experiments/my-experiment' },
- *     { label: 'abc123' },
- *   ]}
- *   actions={<StatusBadge />}
- * />
+ * PageHeader: consistent header strip on every page.
+ * No background—shows through to page. Breadcrumb, title, actions, optional context/filters.
+ * Horizontal rule is container width (same as main content/tables).
  */
-
 interface PageHeaderProps {
-  /** Page title - required */
   title: React.ReactNode;
-  /** Optional subtitle displayed below title */
   subtitle?: React.ReactNode;
-  /** Optional breadcrumb items (for detail pages) */
   breadcrumb?: BreadcrumbItem[];
-  /** Optional actions (buttons, etc.) to display on the right of title */
   actions?: React.ReactNode;
-  /** Optional context row: scope/selection summary + quick controls */
   context?: React.ReactNode;
-  /** Optional filters row: filter chips + clear */
   filters?: React.ReactNode;
-  /** Additional className for the container */
   className?: string;
 }
 
@@ -57,43 +27,47 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <div className={cn('space-y-4', className)}>
-      {/* Header content section */}
-      <div className="pt-4 pb-6">
-        {/* Breadcrumb row */}
-        <div className="h-5 mb-4">
-          {breadcrumb && breadcrumb.length > 0 && (
+    <header
+      className={cn('flex w-full flex-col border-b border-border', className)}
+      style={{ minHeight: 'var(--page-header-height)' }}
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-5 pt-3 pb-6">
+        {/* Breadcrumb row - fixed space */}
+        <div className="h-5 shrink-0">
+          {breadcrumb && breadcrumb.length > 0 ? (
             <Breadcrumb items={breadcrumb} />
+          ) : (
+            <span aria-hidden className="block h-5" />
           )}
         </div>
 
-        {/* Identity layer: Title + subtitle + actions */}
-        <div className="flex items-center justify-between gap-4">
+        {/* Title + subtitle + actions */}
+        <div className="flex shrink-0 items-center justify-between gap-6">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight truncate">
+            <h1 className="font-sans text-4xl font-bold tracking-tight text-foreground overflow-x-clip text-ellipsis whitespace-nowrap">
               {title}
             </h1>
             {subtitle && (
-              <p className="text-sm text-muted-foreground mt-2">
+              <p className="mt-3 font-sans text-base font-normal text-muted-foreground">
                 {subtitle}
               </p>
             )}
           </div>
-
-          {/* Actions on the right */}
           {actions && (
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
               {actions}
             </div>
           )}
         </div>
+
+        {/* Context and filters */}
+        {(context || filters) && (
+          <div className="flex flex-col gap-4">
+            {context}
+            {filters}
+          </div>
+        )}
       </div>
-
-      {/* Context layer: scope/selection summary */}
-      {context}
-
-      {/* Filters layer: filter chips */}
-      {filters}
-    </div>
+    </header>
   );
 }

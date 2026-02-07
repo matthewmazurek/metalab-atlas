@@ -31,9 +31,9 @@ from atlas.routers import (
     artifacts_router,
     experiments_router,
     field_values_router,
-    histogram_router,
     meta_router,
     runs_router,
+    search_router,
 )
 
 # Path to bundled static files
@@ -50,8 +50,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",  # Vite default
+        "http://localhost:5175",  # redesign-chartmogul
         "http://localhost:3000",  # Alternative
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5175",
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
@@ -147,13 +149,13 @@ class PrettyJSONMiddleware:
 
 app.add_middleware(PrettyJSONMiddleware)
 
-# Include API routers
+# Include API routers (search first so /api/search is matched before the SPA catch-all)
+app.include_router(search_router)
 app.include_router(runs_router)
 app.include_router(artifacts_router)
 app.include_router(meta_router)
 app.include_router(field_values_router)
 app.include_router(experiments_router)
-app.include_router(histogram_router)
 
 
 @app.get("/api/health")
