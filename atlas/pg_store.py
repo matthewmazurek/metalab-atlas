@@ -244,7 +244,7 @@ class PostgresStoreAdapter:
         self._pool = ConnectionPool(
             self._connection_string,
             min_size=1,
-            max_size=10,
+            max_size=5,
             timeout=self._connect_timeout,
         )
 
