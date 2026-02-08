@@ -485,6 +485,37 @@ class AggregateResponse(BaseModel):
 
 
 # =============================================================================
+# Structured Data Models (capture.data)
+# =============================================================================
+
+
+class DataEntryInfo(BaseModel):
+    """Summary info for a single capture.data() entry."""
+
+    name: str
+    shape: list[int] | None = None
+    dtype: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DataListResponse(BaseModel):
+    """List of structured data entries for a run."""
+
+    run_id: str
+    entries: list[DataEntryInfo]
+
+
+class DataEntryResponse(BaseModel):
+    """Full structured data entry with payload."""
+
+    name: str
+    data: Any = Field(..., description="The data payload (JSON-serializable)")
+    shape: list[int] | None = None
+    dtype: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
 # Search Models
 # =============================================================================
 

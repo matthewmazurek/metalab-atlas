@@ -9,6 +9,8 @@ import {
   fetchRun,
   fetchArtifacts,
   fetchArtifactPreview,
+  fetchDataList,
+  fetchDataEntry,
   fetchLog,
   fetchLogsList,
   fetchFields,
@@ -58,6 +60,9 @@ export const queryKeys = {
     ['slurmStatus', experimentId] as const,
   statusCounts: (experimentId: string) =>
     ['statusCounts', experimentId] as const,
+  dataList: (runId: string) => ['dataList', runId] as const,
+  dataEntry: (runId: string, dataName: string) =>
+    ['dataEntry', runId, dataName] as const,
   search: (query: string, limit?: number) =>
     ['search', query, limit] as const,
   searchLogs: (query: string, limit?: number) =>
@@ -103,6 +108,22 @@ export function useArtifactPreview(runId: string, artifactName: string) {
     queryKey: queryKeys.artifactPreview(runId, artifactName),
     queryFn: () => fetchArtifactPreview(runId, artifactName),
     enabled: !!runId && !!artifactName,
+  });
+}
+
+export function useDataList(runId: string) {
+  return useQuery({
+    queryKey: queryKeys.dataList(runId),
+    queryFn: () => fetchDataList(runId),
+    enabled: !!runId,
+  });
+}
+
+export function useDataEntry(runId: string, dataName: string) {
+  return useQuery({
+    queryKey: queryKeys.dataEntry(runId, dataName),
+    queryFn: () => fetchDataEntry(runId, dataName),
+    enabled: !!runId && !!dataName,
   });
 }
 

@@ -6,6 +6,8 @@ import axios from 'axios';
 import type {
   ArtifactInfo,
   ArtifactPreview,
+  DataEntryResponse,
+  DataListResponse,
   ExperimentsResponse,
   FieldIndex,
   FieldValuesRequest,
@@ -216,6 +218,22 @@ export function getExportUrl(
   const path = `/api/experiments/${encodeURIComponent(experimentId)}/export`;
 
   return `${API_BASE}${path}${queryString ? `?${queryString}` : ''}`;
+}
+
+// Structured data (capture.data)
+export async function fetchDataList(runId: string): Promise<DataListResponse> {
+  const response = await api.get<DataListResponse>(`/api/runs/${runId}/data`);
+  return response.data;
+}
+
+export async function fetchDataEntry(
+  runId: string,
+  dataName: string
+): Promise<DataEntryResponse> {
+  const response = await api.get<DataEntryResponse>(
+    `/api/runs/${runId}/data/${dataName}`
+  );
+  return response.data;
 }
 
 export async function fetchSlurmStatus(

@@ -222,6 +222,27 @@ export interface StatusCounts {
   total: number;
 }
 
+// Structured data models (capture.data)
+export interface DataEntryInfo {
+  name: string;
+  shape?: number[] | null;
+  dtype?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface DataListResponse {
+  run_id: string;
+  entries: DataEntryInfo[];
+}
+
+export interface DataEntryResponse {
+  name: string;
+  data: unknown;
+  shape?: number[] | null;
+  dtype?: string | null;
+  metadata: Record<string, unknown>;
+}
+
 // Search models
 export interface SearchHit {
   label: string;

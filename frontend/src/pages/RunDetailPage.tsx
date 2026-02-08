@@ -375,14 +375,9 @@ export function RunDetailPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-          Artifacts
+          Artifacts & Data
           ═══════════════════════════════════════════════════════════════════ */}
-      {run.artifacts.length > 0 && (
-        <div className="space-y-3">
-          <h2 className={SECTION_HEADING_CLASS}>Artifacts</h2>
-          <ArtifactList runId={run.record.run_id} artifacts={run.artifacts} />
-        </div>
-      )}
+      <ArtifactList runId={run.record.run_id} artifacts={run.artifacts} />
 
       {/* ═══════════════════════════════════════════════════════════════════
           Logs (full width)
