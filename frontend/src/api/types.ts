@@ -145,6 +145,26 @@ export interface ExperimentsResponse {
   experiments: ExperimentInfo[];
 }
 
+/** Combined experiment summary from /api/meta/experiments/summary */
+export interface ExperimentSummary {
+  experiment_id: string;
+  run_count: number;
+  latest_run?: string | null;
+  // Inline status counts
+  success: number;
+  failed: number;
+  running: number;
+  cancelled: number;
+  // Manifest summary
+  name?: string | null;
+  tags: string[];
+  total_runs?: number | null;
+}
+
+export interface ExperimentsSummaryResponse {
+  experiments: ExperimentSummary[];
+}
+
 // Manifest models
 export interface ManifestInfo {
   experiment_id: string;

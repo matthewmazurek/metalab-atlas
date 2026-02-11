@@ -15,6 +15,7 @@ import {
   fetchLogsList,
   fetchFields,
   fetchExperiments,
+  fetchExperimentsSummary,
   fetchFieldValues,
   fetchExperimentManifests,
   fetchLatestManifest,
@@ -49,6 +50,7 @@ export const queryKeys = {
   logsList: (runId: string) => ['logsList', runId] as const,
   fields: (experimentId?: string) => ['fields', experimentId] as const,
   experiments: () => ['experiments'] as const,
+  experimentsSummary: () => ['experimentsSummary'] as const,
   fieldValues: (request: FieldValuesRequest) => ['fieldValues', request] as const,
   experimentManifests: (experimentId: string) =>
     ['experimentManifests', experimentId] as const,
@@ -161,6 +163,15 @@ export function useExperiments() {
     queryKey: queryKeys.experiments(),
     queryFn: fetchExperiments,
     refetchInterval: REFETCH_INTERVAL,
+  });
+}
+
+export function useExperimentsSummary() {
+  return useQuery({
+    queryKey: queryKeys.experimentsSummary(),
+    queryFn: fetchExperimentsSummary,
+    refetchInterval: REFETCH_INTERVAL,
+    placeholderData: (previousData) => previousData,
   });
 }
 

@@ -4,13 +4,22 @@ Meta API router: Field discovery and experiment listing.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated
 
 from atlas.deps import StoreAdapter, get_store, refresh_stores
-from atlas.models import ExperimentInfo, ExperimentsResponse, FieldIndex
+from atlas.models import (
+    ExperimentInfo,
+    ExperimentSummary,
+    ExperimentsResponse,
+    ExperimentsSummaryResponse,
+    FieldIndex,
+)
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
@@ -88,3 +97,66 @@ async def list_experiments(
     )
 
     return ExperimentsResponse(experiments=experiments)
+
+
+def _fallback_experiments_summary(store: StoreAdapter) -> list[ExperimentSummary]:
+    """
+    Build experiment summaries from individual store methods.
+
+    Used when the store doesn't support the optimized batch query
+    (i.e. non-Postgres stores like FileStoreAdapter).
+    """
+    experiments_data = store.list_experiments()
+    summaries: list[ExperimentSummary] = []
+
+    for exp_id, count, latest in experiments_data:
+        # Get status counts
+        counts = store.get_status_counts(exp_id)
+
+        # Get latest manifest
+        manifest = store.get_experiment_manifest(exp_id, timestamp=None)
+
+        summaries.append(
+            ExperimentSummary(
+                experiment_id=exp_id,
+                run_count=count,
+                latest_run=latest,
+                success=counts.success,
+                failed=counts.failed,
+                running=counts.running,
+                cancelled=counts.cancelled,
+                name=manifest.name if manifest else None,
+                tags=manifest.tags if manifest else [],
+                total_runs=manifest.total_runs if manifest else None,
+            )
+        )
+
+    return summaries
+
+
+@router.get("/experiments/summary", response_model=ExperimentsSummaryResponse)
+async def list_experiments_summary(
+    store: Annotated[StoreAdapter, Depends(get_store)],
+) -> ExperimentsSummaryResponse:
+    """
+    List all experiments with status counts and manifest info in one call.
+
+    This is the preferred endpoint for the experiments list page. It returns
+    everything needed to render the full table without per-experiment requests.
+
+    Uses an optimized batch query on Postgres stores; falls back to N+1
+    calls on file-based stores (where N is typically small).
+    """
+    # Use optimized batch method if available (Postgres stores)
+    if hasattr(store, "get_experiments_summary"):
+        experiments = store.get_experiments_summary()
+    else:
+        experiments = _fallback_experiments_summary(store)
+
+    # Sort by latest run (most recent first)
+    experiments.sort(
+        key=lambda e: (e.latest_run is not None, e.latest_run or datetime.min),
+        reverse=True,
+    )
+
+    return ExperimentsSummaryResponse(experiments=experiments)

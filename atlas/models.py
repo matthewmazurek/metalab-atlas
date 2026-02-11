@@ -317,6 +317,37 @@ class ExperimentsResponse(BaseModel):
     experiments: list[ExperimentInfo]
 
 
+class ExperimentSummary(BaseModel):
+    """
+    Combined experiment info for the experiments list page.
+
+    Merges experiment metadata, status counts, and manifest info into a
+    single object so the frontend can render the full table from one request
+    instead of N+1 calls.
+    """
+
+    experiment_id: str
+    run_count: int
+    latest_run: datetime | None = None
+
+    # Inline status counts (avoids per-experiment /status-counts call)
+    success: int = 0
+    failed: int = 0
+    running: int = 0
+    cancelled: int = 0
+
+    # Manifest summary (avoids per-experiment /manifests/latest call)
+    name: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    total_runs: int | None = None
+
+
+class ExperimentsSummaryResponse(BaseModel):
+    """Batch response with all experiment summaries."""
+
+    experiments: list[ExperimentSummary]
+
+
 # =============================================================================
 # Manifest Models
 # =============================================================================

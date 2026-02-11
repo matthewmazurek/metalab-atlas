@@ -1,9 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTableNavigation } from '@/hooks/useTableNavigation';
-import { useQueries } from '@tanstack/react-query';
-import { useExperiments, useSearch, useStatusCounts, useStatusCountsBatch, queryKeys } from '@/api/hooks';
-import { fetchLatestManifest } from '@/api/client';
+import { useExperimentsSummary, useSearch } from '@/api/hooks';
 import { Badge } from '@/components/ui/badge';
 import { FilterPills } from '@/components/ui/FilterPills';
 import { ExperimentTagList } from '@/components/ui/experiment-tag';
@@ -17,57 +15,21 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ColumnHeader, type SortDirection } from '@/components/runs/ColumnHeader';
-import type { ExperimentInfo, ManifestResponse } from '@/api/types';
+import type { ExperimentSummary } from '@/api/types';
 import { PaginationBar } from '@/components/ui/PaginationBar';
 import { Loader2, CheckCircle2, AlertTriangle, Beaker } from 'lucide-react';
 import { formatRelativeTime, parseApiDate } from '@/lib/datetime';
 
 const PAGE_SIZE = 25;
 
-/**
- * Hook to fetch manifests for multiple experiments in parallel
- */
-function useExperimentManifests(experimentIds: string[]) {
-  const queries = useQueries({
-    queries: experimentIds.map((id) => ({
-      queryKey: queryKeys.latestManifest(id),
-      queryFn: () => fetchLatestManifest(id),
-      enabled: !!id,
-      staleTime: 30 * 1000,
-    })),
-  });
-
-  // Build a map of experiment_id -> manifest
-  const manifestMap = useMemo(() => {
-    const map = new Map<string, ManifestResponse>();
-    queries.forEach((query, index) => {
-      if (query.data) {
-        map.set(experimentIds[index], query.data);
-      }
-    });
-    return map;
-  }, [queries, experimentIds]);
-
-  // Collect all unique tags
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    queries.forEach((query) => {
-      if (query.data?.tags) {
-        query.data.tags.forEach((tag) => tagSet.add(tag));
-      }
-    });
-    return Array.from(tagSet).sort();
-  }, [queries]);
-
-  return { manifestMap, allTags };
-}
-
 // Status values for filtering
 const STATUS_VALUES = ['Complete', 'In progress'];
 
 /**
- * Row component that displays an experiment
- * 
+ * Row component that displays an experiment.
+ *
+ * All data comes from the batch summary — no per-row data fetching.
+ *
  * Status visual guide:
  * - Green check (CheckCircle2): All runs complete with 100% success (shown next to name)
  * - Warning triangle (AlertTriangle): Has any failed runs (shown next to name)
@@ -75,26 +37,20 @@ const STATUS_VALUES = ['Complete', 'In progress'];
  */
 function ExperimentRow({
   experiment,
-  manifest,
   rowIndex,
   focused,
 }: {
-  experiment: ExperimentInfo;
-  manifest?: ManifestResponse;
+  experiment: ExperimentSummary;
   rowIndex?: number;
   focused?: boolean;
 }) {
   const navigate = useNavigate();
-  const { data: statusCounts } = useStatusCounts(experiment.experiment_id);
-  const successCount = statusCounts?.success ?? 0;
-  const failedCount = statusCounts?.failed ?? 0;
-  const runningCount = statusCounts?.running ?? 0;
 
-  const displayName = manifest?.name || experiment.experiment_id;
-  const totalRuns = manifest?.total_runs;
-  const completedRuns = successCount + failedCount;
+  const displayName = experiment.name || experiment.experiment_id;
+  const totalRuns = experiment.total_runs;
+  const completedRuns = experiment.success + experiment.failed;
   const isComplete = totalRuns != null && completedRuns >= totalRuns;
-  const hasFailures = failedCount > 0;
+  const hasFailures = experiment.failed > 0;
   const isAllSuccess = isComplete && !hasFailures;
 
   const handleRowClick = () => {
@@ -127,7 +83,7 @@ function ExperimentRow({
                 <AlertTriangle className="h-4 w-4 text-status-warning shrink-0" />
               ) : null}
             </div>
-            {manifest?.name && manifest.name !== experiment.experiment_id && (
+            {experiment.name && experiment.name !== experiment.experiment_id && (
               <span className="text-xs text-muted-foreground font-mono truncate block">
                 {experiment.experiment_id}
               </span>
@@ -138,7 +94,7 @@ function ExperimentRow({
 
       {/* Tags */}
       <TableCell onClick={(e) => e.stopPropagation()}>
-        <ExperimentTagList tags={manifest?.tags || []} maxVisible={3} />
+        <ExperimentTagList tags={experiment.tags || []} maxVisible={3} />
       </TableCell>
 
       {/* Status badge */}
@@ -158,21 +114,21 @@ function ExperimentRow({
       {/* Success */}
       <TableCell>
         <span className="text-sm tabular-nums text-muted-foreground">
-          {successCount}
+          {experiment.success}
         </span>
       </TableCell>
 
       {/* Failed */}
       <TableCell>
         <span className="text-sm tabular-nums text-muted-foreground">
-          {failedCount}
+          {experiment.failed}
         </span>
       </TableCell>
 
       {/* Running */}
       <TableCell>
         <span className="text-sm tabular-nums text-muted-foreground">
-          {runningCount}
+          {experiment.running}
         </span>
       </TableCell>
 
@@ -251,7 +207,8 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     onFiltersChange?.({ nameFilter, selectedTags, selectedStatuses });
   }, [nameFilter, selectedTags, selectedStatuses, onFiltersChange]);
 
-  const { data: experimentsData, isLoading: experimentsLoading } = useExperiments();
+  // Single batch request: experiments + status counts + manifest info
+  const { data: summaryData, isLoading: summaryLoading } = useExperimentsSummary();
 
   // When linking from search overflow (e.g. "8 matching experiments" for metric "dummy"),
   // filter to experiments that have that param/metric/derived/artifact (from search API).
@@ -285,40 +242,35 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     return new Set(group.hits.map((h) => h.entity_id));
   }, [searchData?.groups, hasFieldCategory, searchFetching]);
 
-  // Get all experiment IDs
-  const experimentIds = useMemo(
-    () => experimentsData?.experiments.map((e) => e.experiment_id) || [],
-    [experimentsData]
-  );
-
-  // Load manifests for all experiments to enable tag filtering
-  const { manifestMap, allTags } = useExperimentManifests(experimentIds);
-
-  // Load status counts for all experiments to enable status filtering
-  const { statusMap } = useStatusCountsBatch(experimentIds);
+  // Collect all unique tags from summary data
+  const allTags = useMemo(() => {
+    if (!summaryData?.experiments) return [];
+    const tagSet = new Set<string>();
+    for (const exp of summaryData.experiments) {
+      for (const tag of exp.tags) {
+        tagSet.add(tag);
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [summaryData]);
 
   const isLoading =
-    experimentsLoading ||
+    summaryLoading ||
     (hasFieldCategory != null && hasFieldQuery.length >= 2 && searchFetching);
 
   // Apply filtering (name, tags, and status)
   const filteredExperiments = useMemo(() => {
-    if (!experimentsData?.experiments) return [];
+    if (!summaryData?.experiments) return [];
 
     // Helper to check if experiment matches selected statuses
     // Status logic:
     // - "Complete": all expected runs are done (success + failed >= total_runs)
     // - "In progress": not all runs are done yet
-    const matchesStatusFilter = (experimentId: string): boolean => {
+    const matchesStatusFilter = (exp: ExperimentSummary): boolean => {
       if (selectedStatuses.length === 0) return true;
 
-      const manifest = manifestMap.get(experimentId);
-      const status = statusMap.get(experimentId);
-      const totalRuns = manifest?.total_runs;
-      const successCount = status?.successCount ?? 0;
-      const failedCount = status?.failedCount ?? 0;
-
-      const isComplete = totalRuns != null && (successCount + failedCount) >= totalRuns;
+      const totalRuns = exp.total_runs;
+      const isComplete = totalRuns != null && (exp.success + exp.failed) >= totalRuns;
 
       // Check if experiment matches ANY of the selected statuses
       for (const selectedStatus of selectedStatuses) {
@@ -329,7 +281,7 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
       return false;
     };
 
-    return experimentsData.experiments.filter((exp) => {
+    return summaryData.experiments.filter((exp) => {
       // "Has field" filter (from search overflow: experiments with this param/metric/derived/artifact)
       if (hasFieldExperimentIds !== null) {
         if (!hasFieldExperimentIds.has(exp.experiment_id)) {
@@ -339,7 +291,9 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
         // Name filter (only when not filtering by "has field")
         if (nameFilter) {
           const lowerFilter = nameFilter.toLowerCase();
-          if (!exp.experiment_id.toLowerCase().includes(lowerFilter)) {
+          const matchesId = exp.experiment_id.toLowerCase().includes(lowerFilter);
+          const matchesName = exp.name?.toLowerCase().includes(lowerFilter) ?? false;
+          if (!matchesId && !matchesName) {
             return false;
           }
         }
@@ -347,8 +301,7 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
 
       // Tag filter
       if (selectedTags.length > 0) {
-        const manifest = manifestMap.get(exp.experiment_id);
-        const experimentTags = manifest?.tags || [];
+        const experimentTags = exp.tags || [];
         // Check if experiment has any of the selected tags
         const hasSelectedTag = selectedTags.some((tag) => experimentTags.includes(tag));
         if (!hasSelectedTag) {
@@ -357,19 +310,17 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
       }
 
       // Status filter
-      if (!matchesStatusFilter(exp.experiment_id)) {
+      if (!matchesStatusFilter(exp)) {
         return false;
       }
 
       return true;
     });
   }, [
-    experimentsData,
+    summaryData,
     nameFilter,
     selectedTags,
     selectedStatuses,
-    manifestMap,
-    statusMap,
     hasFieldExperimentIds,
   ]);
 
@@ -380,35 +331,33 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     sorted.sort((a, b) => {
       let comparison = 0;
 
-      const aStatus = statusMap.get(a.experiment_id);
-      const bStatus = statusMap.get(b.experiment_id);
-      const aManifest = manifestMap.get(a.experiment_id);
-      const bManifest = manifestMap.get(b.experiment_id);
-
       switch (sortField) {
-        case 'name':
-          comparison = a.experiment_id.localeCompare(b.experiment_id);
+        case 'name': {
+          const aName = a.name || a.experiment_id;
+          const bName = b.name || b.experiment_id;
+          comparison = aName.localeCompare(bName);
           break;
+        }
         case 'status': {
           // Sort by completion status (complete first when desc)
-          const aTotal = aManifest?.total_runs ?? 0;
-          const bTotal = bManifest?.total_runs ?? 0;
-          const aComplete = aTotal > 0 && ((aStatus?.successCount ?? 0) + (aStatus?.failedCount ?? 0)) >= aTotal;
-          const bComplete = bTotal > 0 && ((bStatus?.successCount ?? 0) + (bStatus?.failedCount ?? 0)) >= bTotal;
+          const aTotal = a.total_runs ?? 0;
+          const bTotal = b.total_runs ?? 0;
+          const aComplete = aTotal > 0 && (a.success + a.failed) >= aTotal;
+          const bComplete = bTotal > 0 && (b.success + b.failed) >= bTotal;
           comparison = (aComplete ? 1 : 0) - (bComplete ? 1 : 0);
           break;
         }
         case 'total':
-          comparison = (aManifest?.total_runs ?? 0) - (bManifest?.total_runs ?? 0);
+          comparison = (a.total_runs ?? 0) - (b.total_runs ?? 0);
           break;
         case 'success':
-          comparison = (aStatus?.successCount ?? 0) - (bStatus?.successCount ?? 0);
+          comparison = a.success - b.success;
           break;
         case 'failed':
-          comparison = (aStatus?.failedCount ?? 0) - (bStatus?.failedCount ?? 0);
+          comparison = a.failed - b.failed;
           break;
         case 'running':
-          comparison = (aStatus?.runningCount ?? 0) - (bStatus?.runningCount ?? 0);
+          comparison = a.running - b.running;
           break;
         case 'latest_run': {
           const aTime = parseApiDate(a.latest_run)?.getTime() ?? 0;
@@ -422,7 +371,7 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
     });
 
     return sorted;
-  }, [filteredExperiments, sortField, sortDirection, statusMap, manifestMap]);
+  }, [filteredExperiments, sortField, sortDirection]);
 
   // Paginate
   const paginatedExperiments = useMemo(() => {
@@ -671,7 +620,6 @@ export function ExperimentTable({ onFiltersChange }: ExperimentTableProps) {
                 <ExperimentRow
                   key={experiment.experiment_id}
                   experiment={experiment}
-                  manifest={manifestMap.get(experiment.experiment_id)}
                   rowIndex={i}
                   focused={i === focusedIndex}
                 />

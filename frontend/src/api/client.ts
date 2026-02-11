@@ -9,6 +9,7 @@ import type {
   DataEntryResponse,
   DataListResponse,
   ExperimentsResponse,
+  ExperimentsSummaryResponse,
   FieldIndex,
   FieldValuesRequest,
   FieldValuesResponse,
@@ -141,6 +142,11 @@ export async function fetchFields(experimentId?: string): Promise<FieldIndex> {
 
 export async function fetchExperiments(): Promise<ExperimentsResponse> {
   const response = await api.get<ExperimentsResponse>('/api/meta/experiments');
+  return response.data;
+}
+
+export async function fetchExperimentsSummary(): Promise<ExperimentsSummaryResponse> {
+  const response = await api.get<ExperimentsSummaryResponse>('/api/meta/experiments/summary');
   return response.data;
 }
 

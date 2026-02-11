@@ -27,6 +27,7 @@ from atlas.models import (
     ArtifactInfo,
     ArtifactPreview,
     ExperimentInfo,
+    ExperimentSummary,
     FieldIndex,
     FieldInfo,
     FieldType,
@@ -1164,11 +1165,7 @@ class PostgresStoreAdapter:
                     SELECT 
                         experiment_id,
                         COUNT(*) as run_count,
-                        -- Prefer the timestamp embedded in record_json for "latest run".
-                        -- This avoids timezone skew when legacy writers inserted naive local
-                        -- datetimes into TIMESTAMPTZ columns (Postgres interprets them in the
-                        -- session timezone, often UTC).
-                        MAX((record_json->>'started_at')::timestamp) as latest_run
+                        MAX(started_at) as latest_run
                     FROM {scope.table('runs')}
                     GROUP BY experiment_id
                     ORDER BY latest_run DESC NULLS LAST
@@ -1215,6 +1212,78 @@ class PostgresStoreAdapter:
                     cancelled=counts.get("cancelled", 0),
                     total=sum(counts.values()),
                 )
+
+    def get_experiments_summary(self) -> list[ExperimentSummary]:
+        """
+        Return combined experiment summaries in a single query batch.
+
+        Fetches experiment list with status counts and latest manifest
+        metadata in two SQL queries (instead of 1 + 2N), making the
+        experiments list page load in constant time regardless of
+        experiment count.
+        """
+        scope = self._scope_all()
+        if scope.is_empty:
+            return []
+
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                # Query 1: experiments + inline status counts
+                cur.execute(
+                    f"""
+                    SELECT
+                        experiment_id,
+                        COUNT(*) AS run_count,
+                        MAX(started_at) AS latest_run,
+                        COUNT(*) FILTER (WHERE status = 'success') AS success_count,
+                        COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+                        COUNT(*) FILTER (WHERE status = 'running') AS running_count,
+                        COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_count
+                    FROM {scope.table('runs')}
+                    GROUP BY experiment_id
+                    ORDER BY latest_run DESC NULLS LAST
+                """
+                )
+                experiment_rows = cur.fetchall()
+
+                # Build initial summaries
+                summaries: dict[str, ExperimentSummary] = {}
+                for row in experiment_rows:
+                    exp_id, run_count, latest_run, success, failed, running, cancelled = row
+                    summaries[exp_id] = ExperimentSummary(
+                        experiment_id=exp_id,
+                        run_count=run_count,
+                        latest_run=latest_run,
+                        success=success,
+                        failed=failed,
+                        running=running,
+                        cancelled=cancelled,
+                    )
+
+                # Query 2: latest manifest per experiment (name, tags, total_runs)
+                # Uses DISTINCT ON to get one manifest per experiment efficiently
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT ON (experiment_id)
+                        experiment_id,
+                        manifest_json->>'name' AS name,
+                        manifest_json->'tags' AS tags,
+                        total_runs
+                    FROM {scope.table('experiment_manifests')}
+                    ORDER BY experiment_id, submitted_at DESC
+                """
+                )
+                for row in cur.fetchall():
+                    exp_id, name, tags_json, total_runs = row
+                    if exp_id in summaries:
+                        summaries[exp_id].name = name
+                        summaries[exp_id].total_runs = total_runs
+                        if tags_json:
+                            tags = tags_json if isinstance(tags_json, list) else json.loads(tags_json)
+                            summaries[exp_id].tags = tags
+
+                # Return in same order as experiment_rows
+                return [summaries[row[0]] for row in experiment_rows if row[0] in summaries]
 
     # =========================================================================
     # Manifest methods
