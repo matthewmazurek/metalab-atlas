@@ -81,6 +81,7 @@ export function useRuns(params: {
     queryKey: queryKeys.runs(params),
     queryFn: () => fetchRuns(params),
     refetchInterval: REFETCH_INTERVAL,
+    placeholderData: (previousData) => previousData,
   });
 }
 
@@ -149,7 +150,9 @@ export function useFields(experimentId?: string, isInProgress = false) {
   return useQuery({
     queryKey: queryKeys.fields(experimentId),
     queryFn: () => fetchFields(experimentId),
-    refetchInterval: isInProgress ? ACTIVE_REFETCH_INTERVAL : REFETCH_INTERVAL,
+    staleTime: 5 * 60 * 1000, // 5 minutes — field schema rarely changes
+    refetchInterval: isInProgress ? ACTIVE_REFETCH_INTERVAL : 2 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
   });
 }
 

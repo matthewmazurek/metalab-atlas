@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from atlas.models import AggregateRequest, AggregateResponse
+    from atlas.models import AggregateRequest, AggregateResponse, SearchGroup
 
 
 @runtime_checkable
@@ -118,5 +118,32 @@ class SupportsRefresh(Protocol):
     def refresh(self) -> None:
         """
         Refresh adapter state (re-scan stores, clear caches, etc.).
+        """
+        ...
+
+
+@runtime_checkable
+class SupportsSearch(Protocol):
+    """
+    Adapter capability: native search with SQL pushdown.
+
+    Used by:
+    - search router: to dispatch to efficient SQL-native search
+      instead of the generic Python-loop approach.
+
+    PostgresStoreAdapter implements this with ~5 targeted SQL queries
+    instead of 100+ sequential queries.
+    """
+
+    def search(self, q: str, limit: int = 5) -> list["SearchGroup"]:
+        """
+        Search across experiments, runs, fields, and fingerprints.
+
+        Args:
+            q: The search query string.
+            limit: Maximum hits per category.
+
+        Returns:
+            List of SearchGroup results (empty groups excluded).
         """
         ...

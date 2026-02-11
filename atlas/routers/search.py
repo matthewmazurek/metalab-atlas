@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
+from atlas.capabilities import SupportsSearch
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import (
     FieldFilter,
@@ -32,27 +33,31 @@ def _matches(q: str, text: str) -> bool:
 
 
 def _search_experiments(store: StoreAdapter, q: str, limit: int) -> SearchGroup:
-    """Search experiment IDs by substring."""
+    """Search experiment IDs by substring.
+
+    Single-pass: computes hits and total in one loop.
+    """
     experiments = store.list_experiments()
     hits: list[SearchHit] = []
+    total = 0
     for exp_id, run_count, _ in experiments:
         if _matches(q, exp_id):
-            hits.append(
-                SearchHit(
-                    label=exp_id,
-                    sublabel=f"{run_count} runs",
-                    entity_type="experiment",
-                    entity_id=exp_id,
+            total += 1
+            if len(hits) < limit:
+                hits.append(
+                    SearchHit(
+                        label=exp_id,
+                        sublabel=f"{run_count} runs",
+                        entity_type="experiment",
+                        entity_id=exp_id,
+                    )
                 )
-            )
-            if len(hits) >= limit:
-                break
     return SearchGroup(
         category="experiments",
         label="Experiments",
         scope="experiment",
         hits=hits,
-        total=sum(1 for (e, _, _) in experiments if _matches(q, e)),
+        total=total,
     )
 
 
@@ -65,32 +70,33 @@ def _search_field_names(
     group_label: str,
 ) -> SearchGroup:
     """Find experiments that define a param/metric/derived field whose name contains q."""
+    return _search_field_names_cached(
+        store, q, limit, namespace, category, group_label,
+        lambda exp_id: store.get_field_index(
+            FilterSpec(experiment_id=exp_id) if exp_id else None
+        ),
+    )
+
+
+def _search_field_names_cached(
+    store: StoreAdapter,
+    q: str,
+    limit: int,
+    namespace: str,
+    category: str,
+    group_label: str,
+    get_field_index: object,
+) -> SearchGroup:
+    """Find experiments that define a param/metric/derived field whose name contains q.
+
+    Single-pass: computes hits and total in one loop to avoid doubled iteration.
+    Uses a callable get_field_index for request-scoped caching.
+    """
     experiments = store.list_experiments()
     hits: list[SearchHit] = []
-    for exp_id, run_count, _ in experiments:
-        if len(hits) >= limit:
-            break
-        index = store.get_field_index(FilterSpec(experiment_id=exp_id))
-        if namespace == "params":
-            fields = index.params_fields
-        elif namespace == "metrics":
-            fields = index.metrics_fields
-        else:
-            fields = index.derived_fields
-        for field_name in fields:
-            if _matches(q, field_name):
-                hits.append(
-                    SearchHit(
-                        label=exp_id,
-                        sublabel=f"{field_name} · {run_count} runs",
-                        entity_type="experiment",
-                        entity_id=exp_id,
-                    )
-                )
-                break  # One hit per experiment for this group
     total = 0
     for exp_id, run_count, _ in experiments:
-        index = store.get_field_index(FilterSpec(experiment_id=exp_id))
+        index = get_field_index(exp_id)
         if namespace == "params":
             fields = index.params_fields
         elif namespace == "metrics":
@@ -100,7 +106,16 @@ def _search_field_names(
         for field_name in fields:
             if _matches(q, field_name):
                 total += 1
-                break
+                if len(hits) < limit:
+                    hits.append(
+                        SearchHit(
+                            label=exp_id,
+                            sublabel=f"{field_name} · {run_count} runs",
+                            entity_type="experiment",
+                            entity_id=exp_id,
+                        )
+                    )
+                break  # One hit per experiment for this group
     return SearchGroup(
         category=category,
         label=group_label,
@@ -297,31 +312,13 @@ def _search_fingerprints(store: StoreAdapter, q: str, limit: int) -> SearchGroup
 
 
 def _search_artifact_names(store: StoreAdapter, q: str, limit: int) -> SearchGroup:
-    """Find experiments that produce an artifact whose name contains q (one run per experiment)."""
+    """Find experiments that produce an artifact whose name contains q (one run per experiment).
+
+    Single-pass: computes hits and total in one loop to avoid doubled iteration
+    and doubled query_runs calls.
+    """
     experiments = store.list_experiments()
     hits: list[SearchHit] = []
-    for exp_id, run_count, _ in experiments:
-        if len(hits) >= limit:
-            break
-        runs, _ = store.query_runs(
-            filter=FilterSpec(experiment_id=exp_id),
-            limit=1,
-            offset=0,
-        )
-        if not runs:
-            continue
-        run = runs[0]
-        for art in run.artifacts:
-            if _matches(q, art.name):
-                hits.append(
-                    SearchHit(
-                        label=exp_id,
-                        sublabel=f"{art.name} · {run_count} runs",
-                        entity_type="experiment",
-                        entity_id=exp_id,
-                    )
-                )
-                break
     total = 0
     for exp_id, run_count, _ in experiments:
         runs, _ = store.query_runs(
@@ -334,6 +331,15 @@ def _search_artifact_names(store: StoreAdapter, q: str, limit: int) -> SearchGro
         for art in runs[0].artifacts:
             if _matches(q, art.name):
                 total += 1
+                if len(hits) < limit:
+                    hits.append(
+                        SearchHit(
+                            label=exp_id,
+                            sublabel=f"{art.name} · {run_count} runs",
+                            entity_type="experiment",
+                            entity_id=exp_id,
+                        )
+                    )
                 break
     return SearchGroup(
         category="artifacts",
@@ -345,34 +351,30 @@ def _search_artifact_names(store: StoreAdapter, q: str, limit: int) -> SearchGro
 
 
 def _search_experiment_tags(store: StoreAdapter, q: str, limit: int) -> SearchGroup:
-    """Find experiments whose manifest has a tag containing q."""
+    """Find experiments whose manifest has a tag containing q.
+
+    Single-pass: computes hits and total in one loop to avoid doubled iteration
+    and doubled get_experiment_manifest calls.
+    """
     experiments = store.list_experiments()
     hits: list[SearchHit] = []
-    for exp_id, run_count, _ in experiments:
-        if len(hits) >= limit:
-            break
-        manifest = store.get_experiment_manifest(exp_id, timestamp=None)
-        if not manifest or not manifest.tags:
-            continue
-        for tag in manifest.tags:
-            if _matches(q, tag):
-                hits.append(
-                    SearchHit(
-                        label=exp_id,
-                        sublabel=f"tag: {tag} · {run_count} runs",
-                        entity_type="experiment",
-                        entity_id=exp_id,
-                    )
-                )
-                break
     total = 0
-    for exp_id, _, _ in experiments:
+    for exp_id, run_count, _ in experiments:
         manifest = store.get_experiment_manifest(exp_id, timestamp=None)
         if not manifest or not manifest.tags:
             continue
         for tag in manifest.tags:
             if _matches(q, tag):
                 total += 1
+                if len(hits) < limit:
+                    hits.append(
+                        SearchHit(
+                            label=exp_id,
+                            sublabel=f"tag: {tag} · {run_count} runs",
+                            entity_type="experiment",
+                            entity_id=exp_id,
+                        )
+                    )
                 break
     return SearchGroup(
         category="tags",
@@ -422,26 +424,58 @@ async def search(
     Fast search across experiments, runs, field names/values, fingerprints, artifacts.
 
     Does not include log content search; use GET /api/search/logs for that.
+
+    When the store supports native search (e.g. PostgresStoreAdapter), dispatches
+    to SQL-native search with ~5 targeted queries instead of 100+ sequential ones.
     """
     q = q.strip()
     if not q:
         return SearchResponse(query=q, groups=[])
+
+    # Fast path: SQL-native search for Postgres stores
+    if isinstance(store, SupportsSearch):
+        groups = store.search(q, limit)
+        return SearchResponse(query=q, groups=groups)
+
+    # Generic path: Python-loop search for FileStore and other backends
+    groups = _generic_search(store, q, limit)
+    return SearchResponse(query=q, groups=groups)
+
+
+def _generic_search(
+    store: StoreAdapter, q: str, limit: int
+) -> list[SearchGroup]:
+    """
+    Generic search implementation for non-Postgres backends.
+
+    Uses a request-scoped field index cache to avoid fetching the same
+    experiment's field index multiple times across search groups.
+    """
+    # Request-scoped cache: avoid fetching the same experiment's field index 6 times
+    _field_index_cache: dict[str | None, object] = {}
+
+    def _cached_field_index(experiment_id: str | None = None) -> object:
+        if experiment_id not in _field_index_cache:
+            _field_index_cache[experiment_id] = store.get_field_index(
+                FilterSpec(experiment_id=experiment_id) if experiment_id else None
+            )
+        return _field_index_cache[experiment_id]
 
     groups: list[SearchGroup] = []
 
     # Experiment names
     groups.append(_search_experiments(store, q, limit))
 
-    # Field names (experiment-scoped)
+    # Field names (experiment-scoped) — use cached field index
     groups.append(
-        _search_field_names(store, q, limit, "params", "param_names", "Parameter names")
+        _search_field_names_cached(store, q, limit, "params", "param_names", "Parameter names", _cached_field_index)
     )
     groups.append(
-        _search_field_names(store, q, limit, "metrics", "metric_names", "Metric names")
+        _search_field_names_cached(store, q, limit, "metrics", "metric_names", "Metric names", _cached_field_index)
     )
     groups.append(
-        _search_field_names(
-            store, q, limit, "derived", "derived_names", "Derived metric names"
+        _search_field_names_cached(
+            store, q, limit, "derived", "derived_names", "Derived metric names", _cached_field_index
         )
     )
 
@@ -478,9 +512,7 @@ async def search(
     groups.append(_search_run_tags(store, q, limit))
 
     # Drop empty groups
-    groups = [g for g in groups if g.hits or g.total > 0]
-
-    return SearchResponse(query=q, groups=groups)
+    return [g for g in groups if g.hits or g.total > 0]
 
 
 @router.get("/logs", response_model=SearchResponse)

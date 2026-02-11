@@ -41,6 +41,8 @@ from atlas.models import (
     RecordFields,
     RunResponse,
     RunStatus,
+    SearchGroup,
+    SearchHit,
     StatusCounts,
 )
 from metalab.store.layout import safe_experiment_id
@@ -222,6 +224,11 @@ class PostgresStoreAdapter:
 
         # Cache of experiment_id -> schema mapping
         self._experiment_schemas: dict[str, str] = {}
+
+        # TTL caches to avoid redundant DB queries from frontend polling
+        self._field_index_cache: dict[str | None, tuple[datetime, FieldIndex]] = {}
+        self._experiments_cache: tuple[datetime, list[tuple[str, int, datetime | None]]] | None = None
+        self._cache_ttl = 60  # seconds
 
         # Verify connection
         self._ensure_connected()
@@ -474,12 +481,26 @@ class PostgresStoreAdapter:
 
                 sort_dir = "DESC" if sort_order == "desc" else "ASC"
 
-                # Query with pagination and LEFT JOIN for derived metrics
-                # Get derived table reference
+                # Query with pagination and LEFT JOIN for derived metrics.
+                # Use column projection instead of fetching full record_json
+                # blobs — avoids TOAST decompression of artifacts and other
+                # large fields that the list view doesn't need.
                 derived_table = scope.table("derived", alias="d")
 
                 query_sql = f"""
-                    SELECT r.run_id, r.record_json, d.derived_json
+                    SELECT
+                        r.run_id, r.experiment_id, r.status,
+                        r.started_at, r.finished_at, r.duration_ms,
+                        r.context_fingerprint, r.params_fingerprint,
+                        r.seed_fingerprint,
+                        r.record_json->'params_resolved' AS params,
+                        r.record_json->'metrics' AS metrics,
+                        r.record_json->'tags' AS tags,
+                        r.record_json->'error' AS error,
+                        r.record_json->'provenance' AS provenance,
+                        r.record_json->'warnings' AS warnings,
+                        r.record_json->'notes' AS notes,
+                        d.derived_json
                     FROM {runs_table}
                     LEFT JOIN {derived_table} ON r.run_id = d.run_id
                     WHERE {where_sql}
@@ -491,17 +512,7 @@ class PostgresStoreAdapter:
                 cur.execute(query_sql, params)
                 rows = cur.fetchall()
 
-                runs = []
-                for row in rows:
-                    run_id, record_json, derived_json = row
-                    derived_dict = (
-                        derived_json
-                        if isinstance(derived_json, dict)
-                        else (json.loads(derived_json) if derived_json else None)
-                    )
-                    runs.append(
-                        self._row_to_run_response((run_id, record_json), derived_dict)
-                    )
+                runs = [self._slim_row_to_run_response(row) for row in rows]
 
                 return runs, total
 
@@ -690,6 +701,112 @@ class PostgresStoreAdapter:
             artifacts=artifacts,
         )
 
+    def _slim_row_to_run_response(self, row: tuple) -> RunResponse:
+        """Convert a projected (slim) database row to RunResponse.
+
+        Used by query_runs() to avoid fetching full record_json blobs.
+        The SELECT projects individual columns and JSONB sub-paths instead
+        of the entire record_json, skipping artifacts and other large fields.
+
+        Column order must match the SELECT in query_runs():
+            run_id, experiment_id, status, started_at, finished_at,
+            duration_ms, context_fingerprint, params_fingerprint,
+            seed_fingerprint, params, metrics, tags, error, provenance,
+            warnings, notes, derived_json
+        """
+        (
+            run_id,
+            experiment_id,
+            status,
+            started_at,
+            finished_at,
+            duration_ms,
+            context_fingerprint,
+            params_fingerprint,
+            seed_fingerprint,
+            params_json,
+            metrics_json,
+            tags_json,
+            error_json,
+            provenance_json,
+            warnings_json,
+            notes_json,
+            derived_json,
+        ) = row
+
+        # Parse JSONB sub-paths (psycopg returns dicts for jsonb columns)
+        def _ensure_dict(val: Any) -> dict:
+            if val is None:
+                return {}
+            if isinstance(val, dict):
+                return val
+            return json.loads(val)
+
+        def _ensure_list(val: Any) -> list:
+            if val is None:
+                return []
+            if isinstance(val, list):
+                return val
+            return json.loads(val)
+
+        params = _ensure_dict(params_json)
+        metrics = _ensure_dict(metrics_json)
+        tags = _ensure_list(tags_json)
+        error = error_json if isinstance(error_json, dict) else (
+            json.loads(error_json) if error_json else None
+        )
+        prov_data = _ensure_dict(provenance_json)
+        warnings = _ensure_list(warnings_json)
+        notes = notes_json if isinstance(notes_json, str) else (
+            str(notes_json) if notes_json is not None else None
+        )
+        derived_dict = _ensure_dict(derived_json)
+
+        # Parse timestamps
+        if isinstance(started_at, str):
+            started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        elif started_at is None:
+            started_at = datetime.fromtimestamp(0, tz=timezone.utc)
+
+        if isinstance(finished_at, str):
+            finished_at = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+
+        is_running = status == "running"
+
+        provenance = ProvenanceInfo(
+            code_hash=prov_data.get("code_hash"),
+            python_version=prov_data.get("python_version"),
+            metalab_version=prov_data.get("metalab_version"),
+            executor_id=prov_data.get("executor_id"),
+            host=prov_data.get("host"),
+            extra=prov_data.get("extra", {}),
+        )
+
+        record = RecordFields(
+            run_id=run_id,
+            experiment_id=experiment_id or "",
+            status=RunStatus(status),
+            context_fingerprint=context_fingerprint or "",
+            params_fingerprint=params_fingerprint or "",
+            seed_fingerprint=seed_fingerprint or "",
+            started_at=started_at,
+            finished_at=None if is_running else finished_at,
+            duration_ms=None if is_running else duration_ms,
+            provenance=provenance,
+            error=error,
+            tags=tags,
+            warnings=warnings,
+            notes=notes,
+        )
+
+        return RunResponse(
+            record=record,
+            params=params,
+            metrics=metrics,
+            derived_metrics=derived_dict,
+            artifacts=[],  # List queries skip artifacts; use get_run() for full detail
+        )
+
     def get_run(self, run_id: str) -> RunResponse | None:
         """Get a single run by ID, searching across all schemas."""
         scope = self._scope_for_run(run_id)
@@ -723,11 +840,39 @@ class PostgresStoreAdapter:
         """
         Return field metadata index.
 
-        Uses JSONB introspection to discover fields across all schemas.
+        Uses a TTL cache (60s) to avoid redundant queries from frontend polling.
+        Tries the pre-computed field_catalog table first (fast path).
+        Falls back to JSONB introspection only if the catalog is empty
+        or not yet populated.
         """
+        cache_key = filter.experiment_id if filter else None
+        now = datetime.now(timezone.utc)
+
+        # Check TTL cache
+        if cache_key in self._field_index_cache:
+            cached_time, cached_result = self._field_index_cache[cache_key]
+            if (now - cached_time).total_seconds() < self._cache_ttl:
+                return cached_result
+
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                return self._get_field_index_from_jsonb(cur, filter)
+                # Fast path: use pre-computed field_catalog if available
+                result = None
+                try:
+                    result = self._get_field_index_from_catalog(cur, filter)
+                    if not (result.run_count > 0 or result.params_fields or result.metrics_fields):
+                        result = None
+                except Exception:
+                    # Catalog table may not exist yet — fall through
+                    pass
+
+                # Slow path: JSONB introspection (for stores without catalog)
+                if result is None:
+                    result = self._get_field_index_from_jsonb(cur, filter)
+
+                # Cache the result
+                self._field_index_cache[cache_key] = (now, result)
+                return result
 
     def _get_field_index_from_catalog(
         self,
@@ -998,7 +1143,16 @@ class PostgresStoreAdapter:
         Return list of (experiment_id, run_count, latest_run).
 
         Discovers all metalab schemas and aggregates experiments across them.
+        Uses a TTL cache (60s) to avoid redundant queries from frontend polling.
         """
+        now = datetime.now(timezone.utc)
+
+        # Check TTL cache
+        if self._experiments_cache is not None:
+            cached_time, cached_result = self._experiments_cache
+            if (now - cached_time).total_seconds() < self._cache_ttl:
+                return cached_result
+
         scope = self._scope_all()
         if scope.is_empty:
             return []
@@ -1020,7 +1174,11 @@ class PostgresStoreAdapter:
                     ORDER BY latest_run DESC NULLS LAST
                 """
                 )
-                return [(row[0], row[1], row[2]) for row in cur.fetchall()]
+                result = [(row[0], row[1], row[2]) for row in cur.fetchall()]
+
+        # Cache the result
+        self._experiments_cache = (now, result)
+        return result
 
     def get_status_counts(self, experiment_id: str | None = None) -> StatusCounts:
         """Get lightweight status counts across all schemas."""
@@ -1703,12 +1861,357 @@ class PostgresStoreAdapter:
         return accessor
 
     # =========================================================================
+    # Native search (SupportsSearch protocol)
+    # =========================================================================
+
+    def search(self, q: str, limit: int = 5) -> list[SearchGroup]:
+        """
+        SQL-native search across experiments, runs, fields, and fingerprints.
+
+        Replaces the generic Python-loop search with ~5 targeted SQL queries,
+        each using appropriate indexes (trigram, GIN, btree).
+
+        Args:
+            q: Search query string.
+            limit: Maximum hits per category.
+
+        Returns:
+            List of non-empty SearchGroup results.
+        """
+        groups: list[SearchGroup] = []
+
+        # 1. Experiments (from cached list — tiny, substring match in Python)
+        groups.append(self._search_experiments_native(q, limit))
+
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                # 2. Field names (single query against field_catalog)
+                groups.append(self._search_field_catalog_native(cur, q, limit))
+
+                # 3. Run IDs (single query with trgm index)
+                groups.append(self._search_run_ids_native(cur, q, limit))
+
+                # 4. Fingerprints (single query, 3 columns OR'd)
+                groups.append(self._search_fingerprints_native(cur, q, limit))
+
+                # 5. Experiment tags (from manifests table)
+                groups.append(self._search_experiment_tags_native(cur, q, limit))
+
+                # 6. Run tags (JSONB array search)
+                groups.append(self._search_run_tags_native(cur, q, limit))
+
+        return [g for g in groups if g.hits or g.total > 0]
+
+    def _search_experiments_native(self, q: str, limit: int) -> SearchGroup:
+        """Search experiment IDs by substring (uses cached list)."""
+        experiments = self.list_experiments()
+        q_lower = q.lower()
+        hits: list[SearchHit] = []
+        total = 0
+        for exp_id, run_count, _ in experiments:
+            if q_lower in exp_id.lower():
+                total += 1
+                if len(hits) < limit:
+                    hits.append(
+                        SearchHit(
+                            label=exp_id,
+                            sublabel=f"{run_count} runs",
+                            entity_type="experiment",
+                            entity_id=exp_id,
+                        )
+                    )
+        return SearchGroup(
+            category="experiments",
+            label="Experiments",
+            scope="experiment",
+            hits=hits,
+            total=total,
+        )
+
+    def _search_field_catalog_native(
+        self, cur: Any, q: str, limit: int
+    ) -> SearchGroup:
+        """Search field names in field_catalog via SQL ILIKE."""
+        scope = self._scope_all()
+        if scope.is_empty:
+            return SearchGroup(
+                category="field_names",
+                label="Field names",
+                scope="experiment",
+                hits=[],
+                total=0,
+            )
+
+        pattern = f"%{q}%"
+        cur.execute(
+            f"""
+            SELECT namespace, field_name, count
+            FROM {scope.table('field_catalog')}
+            WHERE field_name ILIKE %s
+            ORDER BY count DESC
+            LIMIT %s
+            """,
+            [pattern, limit],
+        )
+        rows = cur.fetchall()
+
+        # Also get total
+        cur.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {scope.table('field_catalog')}
+            WHERE field_name ILIKE %s
+            """,
+            [pattern],
+        )
+        total = cur.fetchone()[0]
+
+        hits = [
+            SearchHit(
+                label=field_name,
+                sublabel=f"{namespace} · {count} runs",
+                entity_type="experiment",
+                entity_id="",  # Field names aren't experiment-specific in catalog
+                field=f"{namespace}.{field_name}",
+            )
+            for namespace, field_name, count in rows
+        ]
+
+        return SearchGroup(
+            category="field_names",
+            label="Field names",
+            scope="experiment",
+            hits=hits,
+            total=total,
+        )
+
+    def _search_run_ids_native(self, cur: Any, q: str, limit: int) -> SearchGroup:
+        """Search run IDs via SQL ILIKE (uses trigram index if available)."""
+        scope = self._scope_all()
+        if scope.is_empty:
+            return SearchGroup(
+                category="runs", label="Runs", scope="run", hits=[], total=0
+            )
+
+        pattern = f"%{q}%"
+        runs_table = scope.table("runs")
+
+        # Count total matches
+        cur.execute(
+            f"SELECT COUNT(*) FROM {runs_table} WHERE run_id ILIKE %s",
+            [pattern],
+        )
+        total = cur.fetchone()[0]
+
+        # Fetch limited results
+        cur.execute(
+            f"""
+            SELECT run_id, experiment_id
+            FROM {runs_table}
+            WHERE run_id ILIKE %s
+            ORDER BY started_at DESC
+            LIMIT %s
+            """,
+            [pattern, limit],
+        )
+        rows = cur.fetchall()
+
+        hits = [
+            SearchHit(
+                label=run_id,
+                sublabel=experiment_id,
+                entity_type="run",
+                entity_id=run_id,
+            )
+            for run_id, experiment_id in rows
+        ]
+
+        return SearchGroup(
+            category="runs",
+            label="Runs",
+            scope="run",
+            hits=hits,
+            total=total,
+        )
+
+    def _search_fingerprints_native(
+        self, cur: Any, q: str, limit: int
+    ) -> SearchGroup:
+        """Search fingerprints via SQL ILIKE with OR across 3 columns."""
+        scope = self._scope_all()
+        if scope.is_empty:
+            return SearchGroup(
+                category="fingerprints",
+                label="Fingerprints",
+                scope="run",
+                hits=[],
+                total=0,
+            )
+
+        pattern = f"%{q}%"
+        runs_table = scope.table("runs")
+
+        cur.execute(
+            f"""
+            SELECT run_id, experiment_id
+            FROM {runs_table}
+            WHERE seed_fingerprint ILIKE %s
+               OR params_fingerprint ILIKE %s
+               OR context_fingerprint ILIKE %s
+            ORDER BY started_at DESC
+            LIMIT %s
+            """,
+            [pattern, pattern, pattern, limit],
+        )
+        rows = cur.fetchall()
+
+        hits = [
+            SearchHit(
+                label=run_id,
+                sublabel=experiment_id,
+                entity_type="run",
+                entity_id=run_id,
+            )
+            for run_id, experiment_id in rows
+        ]
+
+        total = len(hits) + 1 if len(hits) >= limit else len(hits)
+
+        return SearchGroup(
+            category="fingerprints",
+            label="Fingerprints",
+            scope="run",
+            hits=hits,
+            total=total,
+        )
+
+    def _search_experiment_tags_native(
+        self, cur: Any, q: str, limit: int
+    ) -> SearchGroup:
+        """Search experiment tags from manifests via SQL."""
+        scope = self._scope_all()
+        if scope.is_empty:
+            return SearchGroup(
+                category="tags",
+                label="Tags",
+                scope="experiment",
+                hits=[],
+                total=0,
+            )
+
+        pattern = f"%{q}%"
+        manifests_table = scope.table("experiment_manifests")
+
+        # Search tags in the manifest JSONB — tags is an array of strings.
+        # We look for manifests where any tag matches, using LATERAL unnest.
+        cur.execute(
+            f"""
+            SELECT DISTINCT ON (m.experiment_id)
+                m.experiment_id, t.tag
+            FROM {manifests_table} m,
+                 LATERAL jsonb_array_elements_text(
+                    COALESCE(m.manifest_json->'tags', '[]'::jsonb)
+                 ) AS t(tag)
+            WHERE t.tag ILIKE %s
+            ORDER BY m.experiment_id
+            LIMIT %s
+            """,
+            [pattern, limit],
+        )
+        rows = cur.fetchall()
+
+        hits = [
+            SearchHit(
+                label=exp_id,
+                sublabel=f"tag: {tag}",
+                entity_type="experiment",
+                entity_id=exp_id,
+            )
+            for exp_id, tag in rows
+        ]
+
+        total = len(hits) + 1 if len(hits) >= limit else len(hits)
+
+        return SearchGroup(
+            category="tags",
+            label="Tags",
+            scope="experiment",
+            hits=hits,
+            total=total,
+        )
+
+    def _search_run_tags_native(self, cur: Any, q: str, limit: int) -> SearchGroup:
+        """Search run tags via JSONB array containment."""
+        scope = self._scope_all()
+        if scope.is_empty:
+            return SearchGroup(
+                category="run_tags",
+                label="Run tags",
+                scope="run",
+                hits=[],
+                total=0,
+            )
+
+        pattern = f"%{q}%"
+        runs_table = scope.table("runs")
+
+        # Search tags in the record_json JSONB — tags is an array of strings.
+        cur.execute(
+            f"""
+            SELECT r.run_id, r.experiment_id
+            FROM {runs_table} r,
+                 LATERAL jsonb_array_elements_text(
+                    COALESCE(r.record_json->'tags', '[]'::jsonb)
+                 ) AS t(tag)
+            WHERE t.tag ILIKE %s
+            ORDER BY r.started_at DESC
+            LIMIT %s
+            """,
+            [pattern, limit],
+        )
+        rows = cur.fetchall()
+
+        # Count total
+        cur.execute(
+            f"""
+            SELECT COUNT(DISTINCT r.run_id)
+            FROM {runs_table} r,
+                 LATERAL jsonb_array_elements_text(
+                    COALESCE(r.record_json->'tags', '[]'::jsonb)
+                 ) AS t(tag)
+            WHERE t.tag ILIKE %s
+            """,
+            [pattern],
+        )
+        total = cur.fetchone()[0]
+
+        hits = [
+            SearchHit(
+                label=run_id,
+                sublabel=experiment_id,
+                entity_type="run",
+                entity_id=run_id,
+            )
+            for run_id, experiment_id in rows
+        ]
+
+        return SearchGroup(
+            category="run_tags",
+            label="Run tags",
+            scope="run",
+            hits=hits,
+            total=total,
+        )
+
+    # =========================================================================
     # Control methods
     # =========================================================================
 
     def refresh(self) -> None:
-        """Refresh connection (no-op for Postgres - connection pool handles this)."""
-        pass
+        """Refresh connection and invalidate caches."""
+        self._field_index_cache.clear()
+        self._experiments_cache = None
+        self._refresh_schema_cache()
 
     def disconnect(self) -> None:
         """Close the connection pool."""

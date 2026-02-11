@@ -56,13 +56,8 @@ interface RunTableProps {
 }
 
 export function RunTable({ onVisibleRunIdsChange, onTotalChange }: RunTableProps) {
-  // Use filter directly - no more merging of multiple filter sources
-  const { filter } = useAtlasStore();
-  const filterKey = JSON.stringify(filter);
-
   return (
     <RunTableImpl
-      key={filterKey}
       onVisibleRunIdsChange={onVisibleRunIdsChange}
       onTotalChange={onTotalChange}
     />
