@@ -872,7 +872,7 @@ class PostgresStoreAdapter:
                 result = None
                 try:
                     result = self._get_field_index_from_catalog(cur, filter)
-                    if not (result.run_count > 0 or result.params_fields or result.metrics_fields):
+                    if not (result.params_fields or result.metrics_fields or result.derived_fields):
                         result = None
                 except Exception:
                     # Catalog table may not exist yet — fall through
