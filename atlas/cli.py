@@ -2,8 +2,8 @@
 CLI entry point for MetaLab Atlas.
 
 Usage:
-    metalab-atlas serve --store ./runs --port 8000
-    metalab-atlas serve --remote user@hpc:/path/to/runs --port 8000
+    metalab-atlas serve --store postgresql://user@localhost:5432/metalab --port 8000
+    metalab-atlas serve --discover /path/to/file_root
 """
 
 from __future__ import annotations
@@ -24,25 +24,7 @@ def main():
 @click.option(
     "--store",
     default=None,
-    help="Path to local metalab store directory or PostgreSQL URL",
-    type=click.Path(exists=False),
-)
-@click.option(
-    "--remote",
-    default=None,
-    help="Remote store URL (ssh://user@host/path or user@host:/path)",
-)
-@click.option(
-    "--ssh-key",
-    default=None,
-    help="Path to SSH private key for remote connections",
-    type=click.Path(exists=True),
-)
-@click.option(
-    "--cache-dir",
-    default=None,
-    help="Local cache directory for remote stores",
-    type=click.Path(),
+    help="PostgreSQL connection URL (postgresql://user@host:port/db)",
 )
 @click.option(
     "--discover",
@@ -53,7 +35,7 @@ def main():
 @click.option(
     "--file-root",
     default=None,
-    help="Root directory for files (logs, artifacts) when using PostgreSQL stores",
+    help="Root directory for files (logs, artifacts). Optional; enables content serving.",
     type=click.Path(exists=True),
 )
 @click.option(
@@ -74,10 +56,7 @@ def main():
 )
 def serve(
     store: str | None,
-    remote: str | None,
     discover: str | None,
-    ssh_key: str | None,
-    cache_dir: str | None,
     file_root: str | None,
     host: str,
     port: int,
@@ -85,19 +64,15 @@ def serve(
 ):
     """Start the Atlas dashboard server.
 
-    Examples:
+    Atlas requires a PostgreSQL backend for query operations.
 
-        # Local store
-        metalab-atlas serve --store ./runs
+    Examples:
 
         # PostgreSQL store
         metalab-atlas serve --store postgresql://user@localhost:5432/metalab
 
-        # Remote store via SSH
-        metalab-atlas serve --remote user@hpc.cluster.edu:/scratch/runs
-
-        # Remote with SSH key
-        metalab-atlas serve --remote ssh://user@host/path --ssh-key ~/.ssh/id_rsa
+        # With filesystem access for artifacts/logs
+        metalab-atlas serve --store postgresql://... --file-root /path/to/experiments
 
         # Auto-discover from service bundle
         metalab-atlas serve --discover /path/to/file_root
@@ -134,12 +109,27 @@ def serve(
 
         click.echo(f"Discovered store: {store}")
 
-    # Validate options
-    if store and remote:
-        raise click.UsageError("Cannot specify both --store and --remote")
+    # Validate: must have a store
+    if not store:
+        click.echo(
+            "Error: --store is required (PostgreSQL URL). "
+            "Example: --store postgresql://user@localhost:5432/metalab",
+            err=True,
+        )
+        raise SystemExit(1)
 
-    if not store and not remote:
-        store = "./runs"  # Default to local
+    # Validate: must be a Postgres URL
+    if not is_postgres_url(store):
+        click.echo(
+            f"Error: --store must be a PostgreSQL URL, got: {store}",
+            err=True,
+        )
+        click.echo(
+            "Atlas requires a PostgreSQL backend. "
+            "Example: --store postgresql://user@localhost:5432/metalab",
+            err=True,
+        )
+        raise SystemExit(1)
 
     # Check if bundled frontend exists
     static_dir = Path(__file__).parent / "static"
@@ -147,77 +137,24 @@ def serve(
 
     click.echo("Starting MetaLab Atlas...")
 
-    if remote:
-        # Remote store mode
-        os.environ["ATLAS_STORE_PATH"] = remote
+    # Set environment variables for the app
+    os.environ["ATLAS_STORE_PATH"] = store
 
-        if ssh_key:
-            os.environ["ATLAS_SSH_KEY"] = str(Path(ssh_key).expanduser())
+    if file_root:
+        os.environ["ATLAS_FILE_ROOT"] = str(Path(file_root).resolve())
 
-        if cache_dir:
-            os.environ["ATLAS_CACHE_DIR"] = str(Path(cache_dir).resolve())
+    # Parse connection string for display
+    from urllib.parse import urlparse
 
-        click.echo(f"  Remote store: {remote}")
-        click.echo(f"  Mode: remote (SSH/SFTP)")
+    parsed = urlparse(store)
+    db_name = parsed.path.lstrip("/") if parsed.path else "metalab"
+    host_port = f"{parsed.hostname or 'localhost'}:{parsed.port or 5432}"
 
-        if ssh_key:
-            click.echo(f"  SSH key: {ssh_key}")
-        else:
-            click.echo(f"  SSH key: (using ssh-agent or default keys)")
-
-        if cache_dir:
-            click.echo(f"  Cache dir: {cache_dir}")
-        else:
-            click.echo(f"  Cache dir: (system temp)")
-
-    elif store and is_postgres_url(store):
-        # PostgreSQL store mode
-        os.environ["ATLAS_STORE_PATH"] = store
-
-        if file_root:
-            os.environ["ATLAS_FILE_ROOT"] = str(Path(file_root).resolve())
-
-        # Parse connection string for display
-        from urllib.parse import urlparse
-
-        parsed = urlparse(store)
-        db_name = parsed.path.lstrip("/") if parsed.path else "metalab"
-        host_port = f"{parsed.hostname or 'localhost'}:{parsed.port or 5432}"
-
-        click.echo(f"  PostgreSQL: {host_port}/{db_name}")
-        click.echo(f"  Mode: postgres")
-        if file_root:
-            click.echo(f"  File root: {file_root}")
-        else:
-            click.echo(f"  File root: (not set - log/artifact previews disabled)")
-
+    click.echo(f"  PostgreSQL: {host_port}/{db_name}")
+    if file_root:
+        click.echo(f"  File root: {file_root}")
     else:
-        # Local store mode
-        from atlas.store import discover_stores, is_valid_store
-
-        store_path = Path(store).resolve()
-        os.environ["ATLAS_STORE_PATH"] = str(store_path)
-
-        click.echo(f"  Store path: {store_path}")
-
-        if not store_path.exists():
-            click.echo(f"  Warning: Store path does not exist", err=True)
-            click.echo(
-                "  The server will start but no runs will be available.", err=True
-            )
-        else:
-            stores = discover_stores(store_path)
-            if len(stores) == 0:
-                click.echo(f"  Warning: No valid experiment stores found", err=True)
-            elif len(stores) == 1 and is_valid_store(store_path):
-                click.echo(f"  Mode: single store")
-            else:
-                click.echo(
-                    f"  Mode: multi-store ({len(stores)} experiments discovered)"
-                )
-                for s in stores:
-                    rel_path = s.relative_to(store_path) if s != store_path else "."
-                    click.echo(f"    - {rel_path}")
+        click.echo(f"  File root: (not set - artifact/log content unavailable)")
 
     if has_frontend:
         click.echo(f"  Dashboard: http://{host}:{port}")

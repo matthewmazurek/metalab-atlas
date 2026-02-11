@@ -53,6 +53,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class ContentUnavailableError(Exception):
+    """Raised when artifact/log content exists but cannot be served.
+
+    This occurs when the artifact is stored on the filesystem but
+    Atlas has no file_root configured (no filesystem access).
+    """
+
+    pass
+
+
 # Default page size for keyset pagination
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 1000
@@ -1400,6 +1411,19 @@ class PostgresStoreAdapter:
     # Artifact/log methods
     # =========================================================================
 
+    @staticmethod
+    def _infer_artifact_kind(artifact_format: str) -> str:
+        """Infer artifact kind from format string."""
+        if artifact_format == "json":
+            return "json"
+        elif artifact_format == "npz":
+            return "numpy"
+        elif artifact_format in ("png", "jpg", "jpeg", "gif", "webp"):
+            return "image"
+        elif artifact_format in ("txt", "csv", "log"):
+            return "text"
+        return "file"
+
     def _get_artifact_info(
         self,
         run_id: str,
@@ -1475,7 +1499,13 @@ class PostgresStoreAdapter:
         run_id: str,
         artifact_name: str,
     ) -> tuple[bytes, str]:
-        """Get artifact content from database or filesystem."""
+        """Get artifact content from database or filesystem.
+
+        Raises:
+            FileNotFoundError: If artifact metadata not found in database.
+            ContentUnavailableError: If artifact exists but content cannot be
+                served (e.g., filesystem path without file_root configured).
+        """
         # Look up artifact metadata from database
         info = self._get_artifact_info(run_id, artifact_name)
         if not info:
@@ -1496,7 +1526,12 @@ class PostgresStoreAdapter:
                 if content:
                     return content, content_type
         else:
-            # Filesystem path from URI - need experiment_id to resolve subdirectory
+            # Filesystem path - requires file_root
+            if not self._file_root:
+                raise ContentUnavailableError(
+                    f"Artifact content not available for {run_id}/{artifact_name}. "
+                    "Set ATLAS_FILE_ROOT to enable filesystem access."
+                )
             experiment_id = self._get_experiment_id_for_run(run_id)
             path = self._resolve_artifact_path(uri, experiment_id)
             if path:
@@ -1509,7 +1544,11 @@ class PostgresStoreAdapter:
         run_id: str,
         artifact_name: str,
     ) -> ArtifactPreview:
-        """Get artifact preview from database or filesystem."""
+        """Get artifact preview from database or filesystem.
+
+        When file_root is not configured and the artifact is on the filesystem,
+        returns a preview with metadata but no content.
+        """
         import io
 
         # Look up artifact metadata from run record
@@ -1527,16 +1566,27 @@ class PostgresStoreAdapter:
             schema = scope.single_schema()
             if schema:
                 content = self._get_blob_content(artifact_id, schema)
-        else:
-            # Filesystem path from URI - need experiment_id to resolve subdirectory
+        elif self._file_root:
+            # Filesystem path - only attempt if file_root is configured
             experiment_id = self._get_experiment_id_for_run(run_id)
             path = self._resolve_artifact_path(uri, experiment_id)
             if path:
                 content = path.read_bytes()
                 size_bytes = path.stat().st_size
 
+        # If content is unavailable (no file_root or file not found),
+        # return metadata-only preview
         if content is None:
-            raise FileNotFoundError(f"Artifact not found: {run_id}/{artifact_name}")
+            kind = self._infer_artifact_kind(artifact_format)
+            return ArtifactPreview(
+                name=artifact_name,
+                kind=kind,
+                format=artifact_format,
+                size_bytes=size_bytes,
+                preview=PreviewData(),
+                preview_truncated=False,
+                content_available=False,
+            )
 
         preview = PreviewData()
         truncated = False
@@ -1584,16 +1634,7 @@ class PostgresStoreAdapter:
 
                 preview.image_thumbnail = base64.b64encode(content).decode()
 
-        # Determine kind from format
-        kind = "file"
-        if artifact_format == "json":
-            kind = "json"
-        elif artifact_format == "npz":
-            kind = "numpy"
-        elif artifact_format in ("png", "jpg", "jpeg", "gif", "webp"):
-            kind = "image"
-        elif artifact_format in ("txt", "csv", "log"):
-            kind = "text"
+        kind = self._infer_artifact_kind(artifact_format)
 
         return ArtifactPreview(
             name=artifact_name,

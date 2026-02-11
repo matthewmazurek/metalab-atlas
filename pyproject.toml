@@ -11,7 +11,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "click>=8.0.0",
     "numpy>=1.26.0",
-    "paramiko>=3.0.0",
 ]
 
 [project.optional-dependencies]

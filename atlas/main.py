@@ -5,12 +5,13 @@ Run with:
     uvicorn atlas.main:app --reload
 
 Or using the CLI:
-    metalab-atlas serve --store ./runs
+    metalab-atlas serve --store postgresql://user@localhost:5432/metalab
 """
 
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
@@ -161,15 +162,19 @@ app.include_router(experiments_router)
 @app.get("/api/health")
 async def health():
     """API health check."""
-    from atlas.deps import get_store_path
+    from atlas.deps import get_file_root, get_store_path, is_postgres_url
 
     store_path = get_store_path()
-    path_obj = Path(store_path)
-    return {
+    file_root = get_file_root()
+    result: dict[str, Any] = {
         "status": "healthy",
         "store_path": store_path,
-        "store_exists": path_obj.exists(),
+        "store_type": "postgres" if is_postgres_url(store_path) else "unknown",
     }
+    if file_root:
+        result["file_root"] = file_root
+        result["file_root_exists"] = Path(file_root).exists()
+    return result
 
 
 # Serve static files if the bundled frontend exists

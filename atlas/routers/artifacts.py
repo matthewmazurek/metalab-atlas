@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from atlas.deps import StoreAdapter, get_store
+from atlas.pg_store import ContentUnavailableError
 from atlas.models import ArtifactInfo, ArtifactPreview, DataEntryInfo, DataEntryResponse, DataListResponse
 
 router = APIRouter(prefix="/api/runs/{run_id}", tags=["artifacts"])
@@ -73,6 +74,14 @@ async def get_artifact(
             headers={
                 "Content-Disposition": f'attachment; filename="{artifact_name}"',
             },
+        )
+    except ContentUnavailableError:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Artifact content not available for {run_id}/{artifact_name}. "
+                "Atlas has no filesystem access. Set ATLAS_FILE_ROOT to enable."
+            ),
         )
     except FileNotFoundError:
         raise HTTPException(

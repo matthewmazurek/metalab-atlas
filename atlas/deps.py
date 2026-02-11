@@ -1,96 +1,42 @@
 """
 Dependency injection for MetaLab Atlas.
 
-Provides store adapter instances based on configuration.
-Supports local, remote (SSH), and Postgres stores.
+Atlas requires a PostgreSQL backend for all query operations.
+Optionally, file_root can be provided for serving artifact/log content.
 """
 
 from __future__ import annotations
 
 import os
 from functools import lru_cache
-from pathlib import Path
-from typing import TYPE_CHECKING, Union
 
-from atlas.store import FileStoreAdapter, MultiStoreAdapter, create_store_adapter
+from atlas.pg_store import PostgresStoreAdapter
 
-if TYPE_CHECKING:
-    from atlas.pg_store import PostgresStoreAdapter
-    from atlas.remote import RemoteStoreAdapter
-
-
-# Type alias for store adapters
-StoreAdapter = Union[
-    FileStoreAdapter,
-    MultiStoreAdapter,
-    "RemoteStoreAdapter",
-    "PostgresStoreAdapter",
-]
+# Type alias for store adapter (Postgres-only)
+StoreAdapter = PostgresStoreAdapter
 
 
 def get_store_path() -> str:
-    """Get store path/URL from environment or default."""
-    return os.environ.get("ATLAS_STORE_PATH", "./runs")
+    """Get store path/URL from environment."""
+    return os.environ.get("ATLAS_STORE_PATH", "")
 
 
-def get_remote_config() -> dict[str, str | None]:
-    """Get remote connection config from environment."""
-    return {
-        "key_path": os.environ.get("ATLAS_SSH_KEY"),
-        "password": os.environ.get("ATLAS_SSH_PASSWORD"),
-        "cache_dir": os.environ.get("ATLAS_CACHE_DIR"),
-    }
-
-
-def get_postgres_config() -> dict[str, str | None]:
-    """Get Postgres connection config from environment."""
-    return {
-        "file_root": os.environ.get("ATLAS_FILE_ROOT"),
-    }
-
-
-def is_remote_url(path: str) -> bool:
-    """Check if a path is a remote SSH URL."""
-    return path.startswith("ssh://") or (
-        "@" in path and ":" in path and not path.startswith("postgres")
-    )
+def get_file_root() -> str | None:
+    """Get optional file root from environment."""
+    return os.environ.get("ATLAS_FILE_ROOT")
 
 
 def is_postgres_url(path: str) -> bool:
-    """Check if a path is a PostgreSQL URL."""
+    """Check if a path is a PostgreSQL connection string."""
     return path.startswith("postgresql://") or path.startswith("postgres://")
-
-
-@lru_cache(maxsize=1)
-def _get_local_store_singleton(store_path: str) -> FileStoreAdapter | MultiStoreAdapter:
-    """Create cached local store adapter instance."""
-    return create_store_adapter(store_path)
-
-
-@lru_cache(maxsize=1)
-def _get_remote_store_singleton(
-    url: str,
-    key_path: str | None,
-    cache_dir: str | None,
-) -> "RemoteStoreAdapter":
-    """Create cached remote store adapter instance."""
-    from atlas.remote import create_remote_adapter
-
-    return create_remote_adapter(
-        url=url,
-        key_path=key_path,
-        cache_dir=Path(cache_dir) if cache_dir else None,
-    )
 
 
 @lru_cache(maxsize=1)
 def _get_postgres_store_singleton(
     url: str,
     file_root: str | None,
-) -> "PostgresStoreAdapter":
+) -> PostgresStoreAdapter:
     """Create cached Postgres store adapter instance."""
-    from atlas.pg_store import PostgresStoreAdapter
-
     return PostgresStoreAdapter(
         connection_string=url,
         file_root=file_root,
@@ -101,43 +47,37 @@ def get_store() -> StoreAdapter:
     """
     Dependency that provides the store adapter.
 
-    The store path is read from ATLAS_STORE_PATH environment variable,
-    defaulting to "./runs".
+    The store path is read from ATLAS_STORE_PATH environment variable
+    and must be a PostgreSQL connection string.
 
-    Supports:
-    - Local paths: Creates FileStoreAdapter or MultiStoreAdapter
-    - Remote SSH URLs: Creates RemoteStoreAdapter (ssh://user@host/path or user@host:/path)
-    - Postgres URLs: Creates PostgresStoreAdapter (postgresql://user@host:port/db)
+    Optionally, ATLAS_FILE_ROOT can be set to enable serving artifact
+    and log content from the filesystem.
 
-    If the path contains multiple experiment stores in subdirectories,
-    a MultiStoreAdapter is returned that aggregates all stores.
+    Raises:
+        ValueError: If ATLAS_STORE_PATH is not set or is not a PostgreSQL URL.
     """
     store_path = get_store_path()
 
-    if is_postgres_url(store_path):
-        config = get_postgres_config()
-        return _get_postgres_store_singleton(
-            store_path,
-            config["file_root"],
+    if not store_path:
+        raise ValueError(
+            "ATLAS_STORE_PATH is not set. "
+            "Atlas requires a PostgreSQL connection string. "
+            "Example: ATLAS_STORE_PATH=postgresql://user@localhost:5432/metalab"
         )
 
-    if is_remote_url(store_path):
-        config = get_remote_config()
-        return _get_remote_store_singleton(
-            store_path,
-            config["key_path"],
-            config["cache_dir"],
+    if not is_postgres_url(store_path):
+        raise ValueError(
+            f"ATLAS_STORE_PATH must be a PostgreSQL URL, got: {store_path!r}. "
+            "Atlas requires a PostgreSQL backend for query operations. "
+            "Example: ATLAS_STORE_PATH=postgresql://user@localhost:5432/metalab"
         )
 
-    # Local store
-    resolved = str(Path(store_path).resolve())
-    return _get_local_store_singleton(resolved)
+    file_root = get_file_root()
+    return _get_postgres_store_singleton(store_path, file_root)
 
 
 def reset_store_cache() -> None:
     """Reset the store cache (for testing)."""
-    _get_local_store_singleton.cache_clear()
-    _get_remote_store_singleton.cache_clear()
     _get_postgres_store_singleton.cache_clear()
 
 
@@ -145,18 +85,13 @@ def refresh_stores() -> int:
     """
     Refresh store discovery to pick up new experiments.
 
-    Returns the number of stores discovered.
+    Returns 1 (single Postgres store).
     """
-    from atlas.capabilities import SupportsRefresh, SupportsStorePaths
+    from atlas.capabilities import SupportsRefresh
 
     store = get_store()
 
-    # Refresh if supported
     if isinstance(store, SupportsRefresh):
         store.refresh()
 
-    # Return number of store paths if supported
-    if isinstance(store, SupportsStorePaths):
-        return len(store.get_store_paths())
-
-    return 1  # Single store adapter without SupportsStorePaths
+    return 1

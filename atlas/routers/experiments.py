@@ -4,7 +4,6 @@ Experiments API router: Manifest listing, retrieval, and export.
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 from datetime import datetime
@@ -14,7 +13,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
-from atlas.capabilities import SupportsRemoteExec, SupportsStorePaths
 from atlas.deps import StoreAdapter, get_store
 from atlas.models import (
     FilterSpec,
@@ -215,8 +213,8 @@ def _get_experiment_store_path(
     """
     Get the store path for an experiment (with caching).
 
-    Searches for experiment manifests in the experiments/ subdirectory
-    of each store path.
+    With Postgres-only Atlas, this returns the file_root from the
+    PostgresStoreAdapter if available, otherwise None.
 
     Args:
         experiment_id: The experiment ID to look up.
@@ -232,27 +230,14 @@ def _get_experiment_store_path(
         if (now - cached_at).total_seconds() < _CACHE_TTL_SECONDS:
             return cached_path
 
-    # Use SupportsStorePaths capability if available
-    if isinstance(store, SupportsStorePaths):
-        # Experiment IDs may contain colons, which are replaced with underscores in filenames
+    # Get file_root from the PG adapter if available
+    file_root = getattr(store, "_file_root", None)
+    if file_root:
         safe_id = safe_experiment_id(experiment_id)
-
-        for store_path in store.get_store_paths():
-            experiments_dir = store_path / "experiments"
-            if not experiments_dir.exists():
-                continue
-
-            # Look for any manifest file matching this experiment
-            # Format: {safe_id}_{YYYYMMDD_HHMMSS}.json
-            for manifest_path in experiments_dir.glob(f"{safe_id}_*.json"):
-                try:
-                    with open(manifest_path) as f:
-                        manifest = json.load(f)
-                    if manifest.get("experiment_id") == experiment_id:
-                        _experiment_store_cache[experiment_id] = (str(store_path), now)
-                        return str(store_path)
-                except Exception:
-                    pass
+        store_path = Path(file_root) / safe_id
+        if store_path.exists():
+            _experiment_store_cache[experiment_id] = (str(store_path), now)
+            return str(store_path)
 
     return None
 
@@ -427,14 +412,10 @@ async def get_slurm_status(
     job_list = ",".join(job_ids)
     squeue_cmd = f"squeue -h -j {job_list} -o '%i %T'"
 
-    # Use SupportsRemoteExec capability if available, otherwise run locally
-    if isinstance(store, SupportsRemoteExec):
-        exit_code, stdout, stderr = store.exec_remote_command(squeue_cmd, timeout=30.0)
-    else:
-        exit_code, stdout, stderr = _run_local_slurm_cmd(
-            ["squeue", "-h", "-j", job_list, "-o", "%i %T"],
-            timeout=30.0,
-        )
+    exit_code, stdout, stderr = _run_local_slurm_cmd(
+        ["squeue", "-h", "-j", job_list, "-o", "%i %T"],
+        timeout=30.0,
+    )
 
     now = datetime.now()
     squeue_counts = _parse_squeue_output(stdout) if exit_code == 0 else {}
@@ -443,13 +424,10 @@ async def get_slurm_status(
     # Query sacct
     sacct_cmd = f"sacct -n -P -j {job_list} --format=JobIDRaw,State"
 
-    if isinstance(store, SupportsRemoteExec):
-        exit_code, stdout, stderr = store.exec_remote_command(sacct_cmd, timeout=60.0)
-    else:
-        exit_code, stdout, stderr = _run_local_slurm_cmd(
-            ["sacct", "-n", "-P", "-j", job_list, "--format=JobIDRaw,State"],
-            timeout=60.0,
-        )
+    exit_code, stdout, stderr = _run_local_slurm_cmd(
+        ["sacct", "-n", "-P", "-j", job_list, "--format=JobIDRaw,State"],
+        timeout=60.0,
+    )
 
     sacct_counts = _parse_sacct_output(stdout) if exit_code == 0 else {}
     last_sacct_at = now if exit_code == 0 else None

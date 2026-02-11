@@ -186,6 +186,7 @@ class ArtifactPreview(BaseModel):
     size_bytes: int | None = None
     preview: PreviewData | None = None
     preview_truncated: bool = False
+    content_available: bool = True
 
 
 # =============================================================================
